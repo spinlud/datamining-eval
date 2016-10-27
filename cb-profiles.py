@@ -185,11 +185,12 @@ def buildMoviesProfiles():
 
 
 			for x in directors:
-				M_movies[movieid, directors_dict[x]] = 1
+				M_movies[movieid, directors_dict[x]] = 1.0
 
 			for x in actors:
-				M_movies[movieid, actors_dict[x]] = 1
-				
+				M_movies[movieid, actors_dict[x]] = 1.0
+
+			
 
 
 	with io.open(SRC_FOLDER + "movies.csv", "r", encoding="ISO-8859-1") as file:
@@ -204,11 +205,13 @@ def buildMoviesProfiles():
 
 			for x in genres:
 				try:
-					M_movies[movieid, genres_dict[x]] = 1
+					M_movies[movieid, genres_dict[x]] = 1.0
 				except:
 					print "Genre KeyError: " + x
 
 
+
+		
 	
 
 
@@ -221,7 +224,11 @@ def buildMoviesProfiles():
 			movieid= int(tokens[1], 10) - 1
 			tag = tokens[2]
 
-			M_movies[movieid, tags_dict[tag]] = 1
+			M_movies[movieid, tags_dict[tag]] = 1.0
+
+			
+
+
 
 
 
@@ -238,69 +245,79 @@ def buildMoviesProfiles():
 
 def buildUserProfiles():
 
-    M_ = lil_matrix( (N, M) )
-    M_NORM = lil_matrix( (N, M) )
-    avg_movies = defaultdict(float)
-    count_movies = defaultdict(int)
+	M_ = lil_matrix( (N, M) )
+	M_NORM = lil_matrix( (N, M) )
+	avg_users = defaultdict(float)
+	avg_movies = defaultdict(float)
+	count_users = defaultdict(int)
+	count_movies = defaultdict(int)
 
 
-    with open(SRC_FOLDER + "ratings.csv", "r") as file:
-        for line in file:
+	with open(SRC_FOLDER + "ratings.csv", "r") as file:
+		for line in file:
 
-            tokens = line.strip().split(",")
+			tokens = line.strip().split(",")
 
-            userid = int(tokens[0], 10) - 1
-            movieid = int(tokens[1], 10) - 1
-            score = float(tokens[2])
+			userid = int(tokens[0], 10) - 1
+			movieid = int(tokens[1], 10) - 1
+			score = float(tokens[2])
 
-            M_[userid, movieid] = score
-            
-            avg_movies[movieid] += score
-            
-            count_movies[movieid] += 1
-            
-
-
-
-    for i in avg_movies:
-        avg_movies[i] /= float(count_movies[i])
+			M_[userid, movieid] = score
+			avg_users[userid] += score
+			avg_movies[movieid] += score
+			count_users[userid] += 1
+			count_movies[movieid] += 1
+			
 
 
+	for i in avg_users:
+		avg_users[i] /= float(count_users[i])		
 
-    # normalize matrix
-    for i in xrange(N):
-        for j in M_.getrow(i).nonzero()[1]:
-            M_NORM[i, j] = M_[i, j] - avg_movies[j]
+	for i in avg_movies:
+		avg_movies[i] /= float(count_movies[i])
 
 
 
-    M_movies = spio.loadmat(OUT_FOLDER + "movie_profiles")["M"].tolil()
-    M_users = lil_matrix((N, M_movies._shape[1]))
-    
-    print M_movies._shape
-    print M_users._shape
-
-    # build profiles
-    for i in xrange(N):
-
-        count = 0
-
-        for j in M_NORM.getrow(i).nonzero()[1]:
-            for k in M_movies.getrow(j).nonzero()[1]:
-                # M_NORM[i, j] * M_movies.getrow(j)
-                M_users[i, j] += M_NORM[i, j] * M_movies[j, k]
-
-            count += 1
-
-        for j in M_users.getrow(i).nonzero()[1]:
-            M_users[i, j] /= float(count)
+	# normalize matrix (by user average --> from book)
+	for i in xrange(N):
+		for j in M_.getrow(i).nonzero()[1]:
+			# M_NORM[i, j] = M_[i, j] - avg_movies[j]
+			# M_NORM[i, j] = M_[i, j] - avg_users[i]
+			M_NORM[i, j] = M_[i, j]
 
 
 
-        print M_users
-        exit()  
+	M_movies = spio.loadmat(OUT_FOLDER + "movie_profiles")["M"].tolil()
+	M_users = lil_matrix((N, M_movies._shape[1]))
+	
+	print M_movies._shape
+	print M_users._shape
 
-        
+	# build profiles
+	for i in xrange(N):
+
+		count = 0
+
+		for j in M_NORM.getrow(i).nonzero()[1]:
+
+			for k in M_movies.getrow(j).nonzero()[1]:
+				M_users[i, k] += M_NORM[i, j]
+
+			count += 1
+
+		for j in M_users.getrow(i).nonzero()[1]:
+			M_users[i, j] /= float(count)
+
+
+		
+
+
+
+	# write to disk
+	spio.savemat(OUT_FOLDER + "users_profiles", {"M" : M_users})
+	  
+
+		
 
 
 

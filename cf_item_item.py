@@ -87,7 +87,7 @@ def collaborativeFilteringItemItem(filepath, rows, cols, num_folds, similarity):
         avg_movies = defaultdict(float)
         # rmse = defaultdict(float)
         # cross_val_rmse = defaultdict(float)
-        rmse = 0.0
+        rmse_dict = defaultdict(float)
         mu = 0.0
         similarities = defaultdict(float)
 
@@ -229,7 +229,7 @@ def collaborativeFilteringItemItem(filepath, rows, cols, num_folds, similarity):
 
                 # update rmse
                 error = score - r_xi
-                rmse += error**2
+                rmse_dict[fold_index] += error**2
 
                 # write predictions only for first test (fold)
                 if (fold_index == 1):
@@ -237,7 +237,7 @@ def collaborativeFilteringItemItem(filepath, rows, cols, num_folds, similarity):
 
 
             # update rmse
-            rmse = math.sqrt(rmse / float(count))
+            rmse_dict[fold_index] = math.sqrt(rmse_dict[fold_index] / float(count))
 
             out_file.close()
 
@@ -254,11 +254,15 @@ def collaborativeFilteringItemItem(filepath, rows, cols, num_folds, similarity):
 
 
     # average rmse on number of folds
-    rmse /= num_folds
+    average_rmse = 0.0
+    for key in rmse_dict:
+        avg_rmse += rmse_dict[key]
+    avg_rmse /= float(NUM_FOLDS)
+
 
     # write rmse
     with open(output_folder + "output/rmse_item_item" + EXT, "w") as file:
-        file.write(str(TOP_K) + "\t" + str(rmse))
+        file.write(str(TOP_K) + "\t" + str(avg_rmse))
 
     
 
