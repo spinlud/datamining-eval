@@ -163,7 +163,7 @@ def genderPlot(users_avgs, males, females, show=False):
 	plt.legend()	# show legend
 	plt.grid()		# show grid
 
-	plt.savefig("gender_avg_ratings.eps", format="eps", dpi=1000, show=False)
+	plt.savefig("gender_avg_ratings.eps", format="eps", dpi=1000, bbox_inches='tight')
 
 	if show:
 		plt.show()
@@ -222,7 +222,8 @@ def agePlot(users_avgs, users_ages, show=False):
 	ax.set_position([box.x0, box.y0 + box.height * 0.1,
                  box.width, box.height * 0.9])
 	ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.05),
-          fancybox=True, shadow=True, ncol=5)
+          fancybox=True, shadow=True, ncol=7, prop={'size':8})
+
 
 	plt.title("Age average movie ratings")
 	plt.xlabel("Age")
@@ -230,7 +231,7 @@ def agePlot(users_avgs, users_ages, show=False):
 
 	plt.grid()		# show grid
 
-	plt.savefig("age_avg_ratings.eps", format="eps", dpi=1000)
+	plt.savefig("age_avg_ratings.eps", format="eps", dpi=1000, bbox_inches='tight')
 
 	if show:
 		plt.show()
@@ -288,8 +289,11 @@ def occupationPlot(users_avgs, users_occupations, show=False):
 	box = ax.get_position()
 	ax.set_position([box.x0, box.y0 + box.height * 0.1,
                  box.width, box.height * 0.9])
-	ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.05),
-          fancybox=True, shadow=True, ncol=5)
+
+ 	ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.05),
+          fancybox=True, shadow=True, ncol=7, prop={'size':8})
+
+
 
 	plt.title("Occupation average movie ratings")
 	plt.xlabel("Occupation")
@@ -297,7 +301,7 @@ def occupationPlot(users_avgs, users_occupations, show=False):
 
 	plt.grid()		# show grid
 
-	plt.savefig('occupation_avg_ratings.eps', format='eps', dpi=1000)
+	plt.savefig('occupation_avg_ratings.eps', format='eps', dpi=1000, bbox_inches='tight')
 
 	if show:
 		plt.show()
@@ -333,11 +337,11 @@ if __name__ == '__main__':
 
 	males, females, users_ages, users_occupations = getMetadata()
 
-	genderPlot(users_avgs, males, females)
+	genderPlot(users_avgs, males, females, True)
 
-	agePlot(users_avgs, users_ages)
+	agePlot(users_avgs, users_ages, True)
 
-	occupationPlot(users_avgs, users_occupations)
+	occupationPlot(users_avgs, users_occupations, True)
 
 
 
