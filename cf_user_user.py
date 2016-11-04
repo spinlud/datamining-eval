@@ -252,10 +252,10 @@ def collaborativeFilteringItemItem(filepath, rows, cols, num_folds, similarity):
 
 
     # average rmse on number of folds
-    average_rmse = 0.0
+    avg_rmse = 0.0
     for key in rmse_dict:
         avg_rmse += rmse_dict[key]
-    avg_rmse /= float(NUM_FOLDS)
+    avg_rmse /= float(num_folds)
 
 
     # write rmse

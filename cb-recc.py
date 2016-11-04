@@ -53,7 +53,12 @@ EXT = ".csv"
 def cbRecommender():
 
 	M_movies = spio.loadmat(OUT_FOLDER + "movie_profiles")["M"]
+	out_predictions_path = OUT_FOLDER + "cb_predictions.csv"
+	out_pred_file = open(out_predictions_path, "w")
+	out_pred_file_norm = open(OUT_FOLDER + "cb_predictions_norm.csv", "w")
 
+
+	# for each fold 
 	for fold_index in xrange(1, NUM_FOLDS + 1):
 
 		_M = lil_matrix( (N, M) )
@@ -142,10 +147,7 @@ def cbRecommender():
 		#################################################################################
 
 		print "Test Phase.."
-		test_path = SRC_FOLDER + FILE_NAME_BASE + TEST_PREFIX + str(fold_index) + EXT
-		out_predictions_path = OUT_FOLDER + "cb_predictions.csv"
-		out_pred_file = open(out_predictions_path, "w")
-		out_pred_file_norm = open(OUT_FOLDER + "cb_predictions_norm.csv", "w")
+		test_path = SRC_FOLDER + FILE_NAME_BASE + TEST_PREFIX + str(fold_index) + EXT		
 		count = 0
 
 		pbar = ProgressBar(widgets=widgets, maxval=21000).start()
@@ -189,7 +191,7 @@ def cbRecommender():
 	avg_rmse = 0.0
 	for key in rmse_dict:
 		avg_rmse += rmse_dict[key]
-	avg_rmse /= NUM_FOLDS
+	avg_rmse /= float(NUM_FOLDS)
 
 	with open(OUT_FOLDER + "cb_rmse.csv", "w") as file:
 		file.write(str(avg_rmse) + "\n")
