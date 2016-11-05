@@ -228,10 +228,6 @@ def buildMoviesProfiles():
 
 			
 
-
-
-
-
 	
 	spio.savemat(OUT_FOLDER + "movie_profiles", {"M" : M_movies})
 			

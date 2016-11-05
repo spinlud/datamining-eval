@@ -15,16 +15,25 @@ import io
 import argparse
 import math
 import numpy as np
+import scipy.sparse as sp
 from scipy import io as spio
 from scipy.sparse import csr_matrix
+from scipy.sparse import csc_matrix
 from scipy.sparse import lil_matrix
 from collections import defaultdict
 from collections import OrderedDict
 
+import nltk
+import string
+from nltk.corpus import stopwords
+from nltk.stem.porter import PorterStemmer
+from sklearn.feature_extraction.text import TfidfVectorizer
+
+
 from progressbar import AnimatedMarker, Bar, BouncingBar, Counter, ETA, \
-    FileTransferSpeed, FormatLabel, Percentage, \
-    ProgressBar, ReverseBar, RotatingMarker, \
-    SimpleProgress, Timer
+	FileTransferSpeed, FormatLabel, Percentage, \
+	ProgressBar, ReverseBar, RotatingMarker, \
+	SimpleProgress, Timer
 
 # progress bar settings
 widgets = ['Progress: ', Percentage(), ' ', Bar(marker=RotatingMarker()), ' ', ETA()]
@@ -40,6 +49,8 @@ EXT = ".csv"
 COSINE_SIMILARITY = "cos"
 JACCARD_SIMILARITY = "jac"
 PEARSON_CORR = "pears"
+TF_IDF = "tfidf"
+NONE = "none"
 _P = 0.25
 
 
@@ -48,356 +59,496 @@ _P = 0.25
 
 def parseOutputFolderPath(filepath):
 
-    output_path = ""
-    tokens = filepath.split("/")
+	output_path = ""
+	tokens = filepath.split("/")
 
-    for i in xrange(len(tokens) - 1):
-        output_path += tokens[i] + "/"
+	for i in xrange(len(tokens) - 1):
+		output_path += tokens[i] + "/"
 
-    return output_path
+	return output_path
 
 
 
 def parseFileName(filepath):
 
-    tokens = filepath.split("/")
-    filename = tokens[len(tokens) - 1]
-    tokens = filename.split(".")
-    file_name_no_ext = tokens[len(tokens) - 2]
-    return file_name_no_ext
+	tokens = filepath.split("/")
+	filename = tokens[len(tokens) - 1]
+	tokens = filename.split(".")
+	file_name_no_ext = tokens[len(tokens) - 2]
+	return file_name_no_ext
 
 
 
 
+def build_tfidf_documents(src_folder):
 
+	movie_tfidf_profiles = OrderedDict()
 
-def collaborativeFilteringItemItem(filepath, similarity, hybrid=False):
+	# first add metadata
+	with io.open(src_folder + "ml-latest-small_metadata.csv", "r", encoding="ISO-8859-1") as file:
+		file.readline()		# skip header
+		for line in file:
+			tokens = line.strip().split("\t")
+			movieid = int(tokens[0], 10)
+			tokens = tokens[3:10]	# exclude movie description
+			text = " ".join(tokens)
+			movie_tfidf_profiles[movieid] = text
 
-    output_folder = parseOutputFolderPath(filepath)
-    base_file_name = parseFileName(filepath)
+			
 
+	# then add folksonomy
+	with io.open(src_folder + "tags.csv", "r", encoding="ISO-8859-1") as file:
+		file.readline()		# skip header
+		for line in file:
+			tokens = line.strip().split(",")
+			movieid = int(tokens[1], 10)
+			tag = tokens[2]
+			movie_tfidf_profiles[movieid] += " " + tag
 
-    if hybrid:
-    	out_file_base = "predictions_item_hybrid_" + similarity 
-    else:
-    	out_file_base = "predictions_item_" + similarity 
 
-    out_file = open(output_folder + "output/" + out_file_base + EXT, "w")
+	# private function used by TfidfVectorizer		
+	def normalize(text):
+		tokens = nltk.word_tokenize(text.lower().translate(remove_punctuation_map))
+		stems = [stemmer.stem(t) for t in tokens]
+		return stems	
+	
 
-    avg_rmse_dict = defaultdict(float)
-    avg_mae_dict = defaultdict(float)
+	stemmer = PorterStemmer()
+	
+	remove_punctuation_map = dict((ord(char), None) for char in string.punctuation)
 
+	vectorizer = TfidfVectorizer(tokenizer=normalize, stop_words='english')
 
-    # used only when hybrid = true ---------------------------------------------
-    M_profiles = spio.loadmat(output_folder + "output/movie_profiles.mat")["M"]
-    dots_profiles = M_profiles.dot(M_profiles.transpose())
-    # --------------------------------------------------------------------------
-    
+	# create an array of _M empty strings
+	documents = [""] * _M
+	for movieid in movie_tfidf_profiles:
+		documents[movieid] = movie_tfidf_profiles[movieid]
 
-    # for each fold
-    for fold_index in xrange(1, NUM_FOLDS + 1):
-    	
-        M = lil_matrix( (_N, _M) )
-        M_NORM = lil_matrix( (_N, _M) )
-        avg_users = defaultdict(float)
-        avg_movies = defaultdict(float)
+	# print len(documents)
 
-        rmse_dict = defaultdict(float)
-        mae_dict = defaultdict(float)
-        mu = 0.0
-        similarities = defaultdict(float)
+	
+	# doc1 = movie_tfidf_profiles[1270]
+	# doc2 = movie_tfidf_profiles[2011]
+	# print doc1
+	# print doc2
 
+	M_tfidf = vectorizer.fit_transform(documents)
+	# tfidf = vectorizer.fit_transform([doc1, doc2])
+	# print ((tfidf * tfidf.T).A)[1270,2011]
+	
+	return (M_tfidf * M_tfidf.T).A
+	
+		
 
 
-        print "*** \t FOLD {0} \t ***".format(fold_index)
 
-        #################################################################################
-        #
-        #	training phase
-        #
-        #################################################################################
-        print "Training Phase.."
-        train_path = output_folder + base_file_name + TRAIN_PREFIX + str(fold_index) + EXT
 
 
-        with open(train_path, "r") as file:
 
-            count = 0
-            count_users = defaultdict(int)
-            count_movies = defaultdict(int)
+def collaborativeFilteringItemItem(filepath, similarity, hybrid, tfidf):
 
-            for line in file:
+	src_folder = parseOutputFolderPath(filepath)
+	base_file_name = parseFileName(filepath)
 
-                tokens = line.strip().split(",")
+	if hybrid:
+		out_file_base = "{0}_pred_item_hyb_{1}_".format(base_file_name, _P) + similarity 
 
-                userid = int(tokens[0], 10)
-                movieid = int(tokens[1], 10)
-                score = float(tokens[2])
+	elif tfidf:
+		out_file_base = "{0}_pred_item_tfidf_{1}_".format(base_file_name, _P) + similarity 
+	
+	else:
+		out_file_base = "{0}_pred_item_".format(base_file_name) + similarity 
 
-                M[userid, movieid] = score
-                avg_users[userid] += score
-                avg_movies[movieid] += score
-                count_users[userid] += 1
-                count_movies[movieid] += 1
-                mu += score
-                count += 1
+	out_file = open(src_folder + "output/" + out_file_base + EXT, "w")
 
+	avg_rmse_dict = defaultdict(float)
+	avg_mae_dict = defaultdict(float)
 
 
+	# used only when hybrid = True ---------------------------------------------
+	M_profiles = spio.loadmat(src_folder + "output/movie_profiles.mat")["M"]
+	dots_profiles = M_profiles.dot(M_profiles.transpose())
+	# --------------------------------------------------------------------------
 
-            mu /= count
 
-            for i in avg_users:
-                avg_users[i] /= float(count_users[i])
+	# used only when tfidf = True ---------------------------------------------	
+	if tfidf:
+		print "Computing tf-idf matrix.."
+		dots_tfidf = build_tfidf_documents(src_folder)
+		print "..done"
+	else:
+		# just a placeholder
+		dots_tfidf = False
+	# --------------------------------------------------------------------------
+	
 
 
-            for i in avg_movies:
-                avg_movies[i] /= float(count_movies[i])
+	# for each fold
+	for fold_index in xrange(1, NUM_FOLDS + 1):
+		
+		M = lil_matrix( (_N, _M) )
+		M_NORM = lil_matrix( (_N, _M) )
+		avg_users = defaultdict(float)
+		avg_movies = defaultdict(float)
 
+		rmse_dict = defaultdict(float)
+		mae_dict = defaultdict(float)
+		mu = 0.0
+		similarities = defaultdict(float)
 
-            pbar = ProgressBar(widgets=widgets, maxval=_N).start()
 
 
-            if similarity == PEARSON_CORR:
-                # normalize matrix
-                for i in xrange(_N):
-                    for j in M.getrow(i).nonzero()[1]:
-                        M_NORM[i, j] = M[i, j] - avg_movies[j]
-                    pbar.update(i)
+		print "*** \t FOLD {0} \t ***".format(fold_index)
 
+		#################################################################################
+		#
+		#	training phase
+		#
+		#################################################################################
+		print "Training Phase.."
+		train_path = src_folder + base_file_name + TRAIN_PREFIX + str(fold_index) + EXT
 
-            pbar.finish()
-            print "..done"
 
+		with open(train_path, "r") as file:
 
+			count = 0
+			count_users = defaultdict(int)
+			count_movies = defaultdict(int)
 
+			for line in file:
 
+				tokens = line.strip().split(",")
 
-        #################################################################################
-        #
-        #	test phase
-        #
-        #################################################################################
-        
-        print "Test Phase.."
-        test_path = output_folder + base_file_name + TEST_PREFIX + str(fold_index) + EXT
-        
+				userid = int(tokens[0], 10)
+				movieid = int(tokens[1], 10)
+				score = float(tokens[2])
 
-        print test_path
+				M[userid, movieid] = score
+				M_NORM[userid, movieid] = score
+				avg_users[userid] += score
+				avg_movies[movieid] += score
+				count_users[userid] += 1
+				count_movies[movieid] += 1
+				mu += score
+				count += 1
 
-        M_CSC = M.tocsc()
-        # M_NORM_TRANSP = M_NORM.transpose()
-        dots = M_NORM.transpose().dot(M_NORM)
-        count = 0.0
 
-        pbar = ProgressBar(widgets=widgets, maxval=21000).start()
 
 
-        with open(test_path, "r") as file:
+		mu /= count
 
-            for line in file:
+		for i in avg_users:
+			avg_users[i] /= float(count_users[i])
 
-                tokens = line.strip().split(",")
-                
 
-                userid = int(tokens[0], 10)
-                movieid = int(tokens[1], 10)
-                score = float(tokens[2])
-                count += 1
-                pbar.update(count)
+		for j in avg_movies:
+			avg_movies[j] /= float(count_movies[j])
 
 
 
 
-                if similarity == JACCARD_SIMILARITY:
-                    top_k = topK_JaccardSimilarity(M_CSC, similarities, userid, movieid, hybrid, dots_profiles) 
-                    
-                else:
-                    top_k = topK_CosineSimilarity(M_CSC, dots, similarities, userid, movieid, hybrid, dots_profiles)
-                    
+		
+		# Normalize utility matrix if Pearson Correlation similarity is selected	
+		if similarity == PEARSON_CORR:
+			np.seterr(divide='ignore', invalid='ignore')
+			M_NORM = M_NORM.tocsc()	
+			M_NORM = M_NORM.transpose()
+			sums = np.array(M_NORM.sum(axis=1).squeeze())[0]
+			counts = np.diff(M_NORM.indptr)
+			means = np.nan_to_num(sums / counts)
+			M_NORM.data -= np.repeat(means, counts)
+			M_NORM = M_NORM.transpose()
+			M_NORM = M_NORM.tolil()
+		
 
 
-                r_xi = 0.0
+		# pbar = ProgressBar(widgets=widgets, maxval=_M).start()
 
-                for k in _K:
-                    num = 0.0
-                    den = 0.0
-                    b_xi = avg_users[userid] + avg_movies[movieid] - mu
 
-                    for t in top_k[:k]:
-                        curr_movieid = t[0]
-                        sim = t[1]
-                        b_xj = avg_users[userid] + avg_movies[curr_movieid] - mu
+		# if similarity == PEARSON_CORR:
+		# 	# normalize matrix
+		# 	for j in xrange(_M):
+		# 		for i in M.getcol(j).nonzero()[0]:
+		# 			M_NORM[i, j] = M_NORM[i, j] - avg_movies[j]
+		# 		pbar.update(j)
 
-                        num += sim * (M[userid, curr_movieid] - b_xj)
-                        den += sim
 
-                    if den != 0:
-                        r_xi = b_xi + (num / float(den))
-                    else:
-                        r_xi = b_xi
+		# pbar.finish()
 
+		print "..done"
 
-                    # clamp prediction in [1,5]
-                    if r_xi < 1:
-                        r_xi = 1.0
-                    if r_xi > 5:
-                        r_xi = 5.0
 
 
-                    # update rmse and mae
-                    error = r_xi - score
-                    rmse_dict[k] += error**2
-                    mae_dict[k] = abs(error)
+		#################################################################################
+		#
+		#	test phase
+		#
+		#################################################################################
+		
+		print "Test Phase.."
+		test_path = src_folder + base_file_name + TEST_PREFIX + str(fold_index) + EXT
+		
 
-                # write predictions only for first test (fold)
-                if (fold_index == 1):
-                    out_file.write(tokens[0] + '\t' + tokens[1] + '\t' + str(r_xi) + '\n')
+		print test_path
 
+		
+		dots = M_NORM.transpose().dot(M_NORM)
+		count = 0.0
 
+		pbar = ProgressBar(widgets=widgets, maxval=21000).start()
 
 
-        # update rmse and mae
-        for k in _K:
-            rmse_dict[k] = math.sqrt(rmse_dict[k] / float(count))
-            mae_dict[k] = math.sqrt(mae_dict[k] / float(count))
-            avg_rmse_dict[k] += rmse_dict[k]
-            avg_mae_dict[k] += mae_dict[k]
+		with open(test_path, "r") as file:
 
-        out_file.close()
+			for line in file:
 
+				tokens = line.strip().split(",")
+				
 
-        pbar.finish()
-        print "..done\n"
-        print ""
-        
+				userid = int(tokens[0], 10)
+				movieid = int(tokens[1], 10)
+				score = float(tokens[2])
+				count += 1
+				pbar.update(count)
 
 
 
 
+				if similarity == JACCARD_SIMILARITY:
+					top_k = topK_JaccardSimilarity(M, similarities, userid, movieid, hybrid, M_profiles, tfidf, dots_tfidf) 
+					
+				else:
+					top_k = topK_CosineSimilarity(M, dots, similarities, userid, movieid, hybrid, dots_profiles, tfidf, dots_tfidf)
+					
 
 
+				r_xi = 0.0
 
-    # average rmse on number of folds for each neighbour size and write to disk
-    eval_out_path = output_folder + "output/" + out_file_base
-    eval_out_path += "_hybrid_eval" if hybrid else "_eval"
-    eval_out_path += EXT
+				for k in _K:
+					num = 0.0
+					den = 0.0
+					b_xi = avg_users[userid] + avg_movies[movieid] - mu
 
-    with open(eval_out_path, "w") as file:
+					for t in top_k[:k]:
+						curr_movieid = t[0]
+						sim = t[1]
+						b_xj = avg_users[userid] + avg_movies[curr_movieid] - mu
 
-        file.write("k" + "\t" + "RMSE" + "\t" + "MAE" + "\n")
+						num += sim * (M[userid, curr_movieid] - b_xj)
+						den += sim
 
-        for k in _K:
-            avg_rmse_dict[k] /= 5.0
-            file.write(str(k) + "\t" + str(avg_rmse_dict[k]) + "\t" + str(avg_mae_dict[k]) + "\n")
+					if den != 0:
+						r_xi = b_xi + (num / float(den))
+					else:
+						r_xi = b_xi
 
 
+					# clamp prediction in [1,5]
+					if r_xi < 1:
+						r_xi = 1.0
+					if r_xi > 5:
+						r_xi = 5.0
 
-        
 
-    
+					# update rmse and mae
+					error = r_xi - score
+					rmse_dict[k] += error**2
+					mae_dict[k] += abs(error)
 
+				# write predictions only for first test (fold)
+				if (fold_index == 1):
+					out_file.write(tokens[0] + '\t' + tokens[1] + '\t' + str(r_xi) + '\n')
 
 
 
 
+		# normalize rmse and mae
+		for k in _K:
+			rmse_dict[k] = math.sqrt(rmse_dict[k] / float(count))
+			mae_dict[k] = math.sqrt(mae_dict[k] / float(count))
+			avg_rmse_dict[k] += rmse_dict[k]
+			avg_mae_dict[k] += mae_dict[k]
 
+		out_file.close()
 
 
+		pbar.finish()
+		print "..done\n"
+		print ""
+		
 
-def topK_CosineSimilarity(M_CSC, dots, similarities, userid, movieid, hybrid, dots_profiles):
 
-    top_k = []
-    item_sq_norm = dots[movieid, movieid]
 
 
-    for j in M_CSC.getrow(userid).nonzero()[1]:
 
-        if (j == movieid):
-            continue
 
-        if (movieid, j) in similarities:
-            sim = similarities[ (movieid, j) ]
-            top_k.append( (j, sim) )
-            continue
 
-        if (j, movieid) in similarities:
-            sim = similarities[ (j, movieid) ]
-            top_k.append( (j, sim) )
-            continue
+	# average rmse on number of folds for each neighbour size and write to disk
+	eval_out_path = src_folder + "output/" + out_file_base + "_eval" + EXT
 
-        if item_sq_norm == 0:
-            similarities[ (movieid, j) ] = -1.0
-            top_k.append( (j, -1.0) )
-            continue
+	with open(eval_out_path, "w") as file:
 
-        j_sq_norm = dots[j, j]
+		file.write("k" + "\t" + "RMSE" + "\t" + "MAE" + "\n")
 
-        if j_sq_norm == 0:
-            similarities[ (movieid, j) ] = -1.0
-            top_k.append( (j, -1.0) )
-            continue
+		for k in _K:
+			avg_rmse_dict[k] /= 5.0
+			avg_mae_dict[k] /= 5.0
+			file.write(str(k) + "\t" + str(avg_rmse_dict[k]) + "\t" + str(avg_mae_dict[k]) + "\n")
 
-        sim = dots[movieid, j] / math.sqrt(item_sq_norm * j_sq_norm)
 
 
-        # if hybrid mode is selected, we compute linear combination between cf similarity and content-based similarity
-        if hybrid:
-        	cb_sim = 0.0
-        	num = dots_profiles[movieid, j]
-        	if num != 0:
-        		den = math.sqrt(dots_profiles[movieid, movieid] * dots_profiles[j, j])
-        		cb_sim = num / den
+		
 
-        	sim = _P * cb_sim + (1 - _P) * sim
-        # --------------------------------------------------------------------
+	
 
-        similarities[ (movieid, j) ] = sim
-        top_k.append( (j, sim) )
 
 
-    top_k = sorted(top_k, key=lambda x: x[1], reverse=True)
 
-    return top_k
 
 
 
 
 
+def topK_CosineSimilarity(M, dots, similarities, userid, movieid, hybrid, dots_profiles, tfidf, dots_tfidf):
 
+	top_k = []
+	movieid_sq_norm = dots[movieid, movieid]
 
-def topK_JaccardSimilarity(M_CSC, similarities, userid, movieid):
-    
-    top_k = []
-    sim = 0
+	# used only if hybrid = True
+	if hybrid:
+		movieid_prof_sq_norm = dots_profiles[movieid, movieid]
 
-    # Jaccard similarity
-    for j in M_CSC.getrow(userid).nonzero()[1]:
 
-        if (j == movieid):
-            continue
 
-        if (movieid, j) in similarities:
-            sim = similarities[ (movieid, j) ]
 
-        elif (j, movieid) in similarities:
-            sim = similarities[ (j, movieid) ]
+	for j in M.getrow(userid).nonzero()[1]:
 
-        else:
-            movieid_vector = set(M_CSC.getcol(movieid).nonzero()[0])
-            j_vector = set(M_CSC.getcol(j).nonzero()[0])
-            union = len(movieid_vector.union(j_vector))
-            intersection = len(movieid_vector.intersection(j_vector))
-            sim = intersection / float(union)
-            similarities[ (j, movieid) ] = sim
+		if (j == movieid):
+			continue
 
+		if (movieid, j) in similarities:
+			sim = similarities[ (movieid, j) ]
+			top_k.append( (j, sim) )
+			continue
 
-        top_k.append((j, sim))
+		if (j, movieid) in similarities:
+			sim = similarities[ (j, movieid) ]
+			top_k.append( (j, sim) )
+			continue
 
-    # top 10 items similar to movieid rated by userid
-    top_k = sorted(top_k, key=lambda x: x[1], reverse=True)
+		if movieid_sq_norm == 0:
+			similarities[ (movieid, j) ] = -1.0
+			top_k.append( (j, -1.0) )
+			continue
 
-    return top_k
+		j_sq_norm = dots[j, j]
+
+		if j_sq_norm == 0:
+			similarities[ (movieid, j) ] = -1.0
+			top_k.append( (j, -1.0) )
+			continue
+
+		sim = dots[movieid, j] / math.sqrt(movieid_sq_norm * j_sq_norm)
+
+
+		# if hybrid mode is selected, we compute linear combination between cf similarity and content-based similarity
+		if hybrid:
+			cb_sim = 0.0
+			num = dots_profiles[movieid, j]
+			if num != 0:
+				den = math.sqrt(movieid_prof_sq_norm * dots_profiles[j, j])
+				cb_sim = num / den
+
+			sim = _P * cb_sim + (1 - _P) * sim
+		# --------------------------------------------------------------------
+
+		elif tfidf:
+			cb_sim = dots_tfidf[movieid, j].item()
+			sim = _P * cb_sim + (1 - _P) * sim
+
+		# --------------------------------------------------------------------
+
+
+		similarities[ (movieid, j) ] = sim
+		similarities[ (j, movieid) ] = sim
+		top_k.append( (j, sim) )
+
+
+	top_k = sorted(top_k, key=lambda x: x[1], reverse=True)
+
+	return top_k
+
+
+
+
+
+
+
+
+
+
+
+def topK_JaccardSimilarity(M, similarities, userid, movieid, hybrid, M_profiles, tfidf, dots_tfidf):
+	
+	top_k = []
+	sim = 0
+
+	# extract feature set-vector from profile (rows are movies, columns are features) --> used only if hybrid = True
+	if hybrid:
+		movieid_prof_vect = set(M_profiles.getrow(movieid).nonzero()[1])
+
+	# extract movieid vector from utility matrix
+	movieid_vect = set(M.getcol(movieid).nonzero()[0])
+
+	# Jaccard similarity
+	for j in M.getrow(userid).nonzero()[1]:
+
+		if (j == movieid):
+			continue
+
+		if (movieid, j) in similarities:
+			sim = similarities[ (movieid, j) ]
+			continue
+
+		elif (j, movieid) in similarities:
+			sim = similarities[ (j, movieid) ]
+			continue
+
+		else:			
+			j_vector = set(M.getcol(j).nonzero()[0])
+			union = len(movieid_vect.union(j_vector))
+			intersection = len(movieid_vect.intersection(j_vector))
+			sim = intersection / float(union)
+
+
+		# if hybrid mode is selected, we compute linear combination between cf similarity and content-based similarity	
+		if hybrid:
+			cb_sim = 0.0
+			j_v = set(M_profiles.getrow(j).nonzero()[1])
+			num = len(movie_prof_vect.intersection(j_v))
+			den = len(movie_prof_vect.union(j_v))
+			cb_sim = num / float(den)
+			sim = _P * cb_sim + (1 - _P) * sim
+		# --------------------------------------------------------------------
+
+		elif tfidf:
+			cb_sim = dots_tfidf[movieid, j].item()
+			sim = _P * cb_sim + (1 - _P) * sim
+
+		# --------------------------------------------------------------------
+
+
+		similarities[ (movieid, j) ] = sim
+		similarities[ (j, movieid) ] = sim
+		top_k.append((j, sim))
+
+	# top items similar to movieid rated by userid
+	top_k = sorted(top_k, key=lambda x: x[1], reverse=True)
+
+	return top_k
+
+
+
 
 
 
@@ -411,20 +562,24 @@ def topK_JaccardSimilarity(M_CSC, similarities, userid, movieid):
 ###############################################
 if __name__ == '__main__':
 
-    parser = argparse.ArgumentParser()
+	parser = argparse.ArgumentParser()
 
-    parser.add_argument("filepath", type=str, help="file source path (string)")
-    parser.add_argument("--sim", type=str, nargs="?", const=1, default=PEARSON_CORR, choices=[COSINE_SIMILARITY, JACCARD_SIMILARITY, PEARSON_CORR], help="similarity measure (string)")
-    parser.add_argument("--hybrid", type=bool, nargs="?", const=1, default=False, help="Mix collaborative-filtering and content-based similarities")
-    parser.add_argument("--p", type=float, help="Linear combination factor")
-
-
-    args = parser.parse_args()
-
-    _P = args.p if args.p else _P
+	parser.add_argument("filepath", type=str, help="file source path (string)")
+	parser.add_argument("--sim", type=str, nargs="?", const=1, default=PEARSON_CORR, choices=[COSINE_SIMILARITY, JACCARD_SIMILARITY, PEARSON_CORR], help="similarity measure (string)")
+	parser.add_argument("--hybrid", type=bool, nargs="?", const=1, default=False, help="Mix collaborative-filtering and feature-based similarities")
+	parser.add_argument("--tfidf", type=bool, nargs="?", const=1, default=False, help="Mix collaborative-filtering and document-based similarities")
+	parser.add_argument("--p", type=float, help="Linear combination factor")
 
 
-    collaborativeFilteringItemItem(args.filepath, args.sim, args.hybrid)
+	args = parser.parse_args()
+
+	_P = args.p if args.p else _P
+
+	if args.tfidf:
+		args.hybrid = False
+
+
+	collaborativeFilteringItemItem(args.filepath, args.sim, args.hybrid, args.tfidf)
 
 
 

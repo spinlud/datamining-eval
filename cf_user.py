@@ -34,13 +34,13 @@ _N = 671 + 1
 _M = 164979 + 1
 NUM_FOLDS = 5
 _K = [2, 5, 10, 20]
-TOP_K = 10
 TRAIN_PREFIX = "_train_"
 TEST_PREFIX = "_test_"
 EXT = ".csv"
 COSINE_SIMILARITY = "cos"
 JACCARD_SIMILARITY = "jac"
 PEARSON_CORR = "pears"
+_P = 0.25
 
 
 
@@ -71,22 +71,31 @@ def parseFileName(filepath):
 
 
 
-def collaborativeFilteringItemItem(filepath, similarity):
+def collaborativeFilteringUserUser(filepath, similarity, hybrid=False):
 
     output_folder = parseOutputFolderPath(filepath)
     base_file_name = parseFileName(filepath)
 
-    out_file_base = "predictions_user_" + similarity 
+    if hybrid:
+        out_file_base = "{0}_pred_user_hyb_{1}_".format(base_file_name, _P) + similarity 
+    else:
+        out_file_base = "{0}_pred_user_".format(base_file_name) + similarity 
+
     out_file = open(output_folder + "output/" + out_file_base + EXT, "w")
 
     avg_rmse_dict = defaultdict(float)
     avg_mae_dict = defaultdict(float)
 
 
+    # used only when hybrid = true ---------------------------------------------
+    M_profiles = spio.loadmat(output_folder + "output/users_profiles.mat")["M"]
+    dots_profiles = M_profiles.dot(M_profiles.transpose())
+    # --------------------------------------------------------------------------
 
 
-    for fold_index in xrange(1, NUM_FOLDS + 1):
-    # for fold_index in xrange(5, 6):    
+
+    # for each fold
+    for fold_index in xrange(1, NUM_FOLDS + 1):   
 
         M = lil_matrix( (_N, _M) )
         M_NORM = lil_matrix( (_N, _M) )
@@ -136,29 +145,44 @@ def collaborativeFilteringItemItem(filepath, similarity):
 
 
 
-            mu /= count
+        mu /= count
 
-            for i in avg_users:
-                avg_users[i] /= float(count_users[i])
-
-
-            for i in avg_movies:
-                avg_movies[i] /= float(count_movies[i])
+        for i in avg_users:
+            avg_users[i] /= float(count_users[i])
 
 
-            pbar = ProgressBar(widgets=widgets, maxval=_N).start()
+        for i in avg_movies:
+            avg_movies[i] /= float(count_movies[i])
 
 
-            if similarity == PEARSON_CORR:
-                # normalize matrix
-                for i in xrange(_N):
-                    for j in M.getrow(i).nonzero()[1]:
-                        M_NORM[i, j] = M[i, j] - avg_users[j]
-                    pbar.update(i)
+
+        # Normalize utility matrix if Pearson Correlation similarity is selected    
+        if similarity == PEARSON_CORR:
+            np.seterr(divide='ignore', invalid='ignore')
+            M_NORM = M_NORM.tocsr() 
+            sums = np.array(M_NORM.sum(axis=1).squeeze())[0]
+            counts = np.diff(M_NORM.indptr)
+            means = np.nan_to_num(sums / counts)
+            M_NORM.data -= np.repeat(means, counts)
+            M_NORM = M_NORM.tolil()    
 
 
-            pbar.finish()
-            print "..done"
+
+
+        # pbar = ProgressBar(widgets=widgets, maxval=_N).start()
+
+
+        # if similarity == PEARSON_CORR:
+        #     # normalize matrix
+        #     for i in xrange(_N):
+        #         for j in M.getrow(i).nonzero()[1]:
+        #             M_NORM[i, j] = M[i, j] - avg_users[j]
+        #         pbar.update(i)
+
+
+        # pbar.finish()
+
+        print "..done"
 
 
 
@@ -173,10 +197,8 @@ def collaborativeFilteringItemItem(filepath, similarity):
         print "Test Phase.."
         test_path = output_folder + base_file_name + TEST_PREFIX + str(fold_index) + EXT
         
-
         print test_path
 
-        M_CSC = M.tocsc()
         dots = M_NORM.dot(M_NORM.transpose())
         count = 0.0
 
@@ -200,10 +222,10 @@ def collaborativeFilteringItemItem(filepath, similarity):
 
 
                 if similarity == JACCARD_SIMILARITY:
-                    top_k = topK_JaccardSimilarity(M_CSC, similarities, userid, movieid) 
+                    top_k = topK_JaccardSimilarity(M, similarities, userid, movieid, hybrid, dots_profiles) 
                     
                 else:
-                    top_k = topK_CosineSimilarity(M_CSC, dots, similarities, userid, movieid)
+                    top_k = topK_CosineSimilarity(M, dots, similarities, userid, movieid, hybrid, M_profiles)
                     
 
 
@@ -295,13 +317,17 @@ def collaborativeFilteringItemItem(filepath, similarity):
 
 
 
-def topK_CosineSimilarity(M_CSC, dots, similarities, userid, movieid):
+def topK_CosineSimilarity(M, dots, similarities, userid, movieid, hybrid, dots_profiles):
 
     top_k = []
     user_sq_norm = dots[userid, userid]
 
+    # precompute movie square norm from profile (only used if hybrid = True)
+    userid_prof_sq_norm = dots_profiles[userid, userid]
+
+
     # find users most similar to userid that have rated movieid
-    for i in M_CSC.getcol(movieid).nonzero()[0]:
+    for i in M.getcol(movieid).nonzero()[0]:
 
         if (i == userid):
             continue
@@ -329,11 +355,26 @@ def topK_CosineSimilarity(M_CSC, dots, similarities, userid, movieid):
             continue
 
         sim = dots[userid, i] / math.sqrt(user_sq_norm * i_sq_norm)
+
+
+        # if hybrid mode is selected, we compute linear combination between cf similarity and content-based similarity
+        if hybrid:
+            cb_sim = 0.0
+            num = dots_profiles[userid, i]
+            if num != 0:
+                den = math.sqrt(userid_prof_sq_norm * dots_profiles[i, i])
+                cb_sim = num / den
+
+            sim = _P * cb_sim + (1 - _P) * sim
+        # --------------------------------------------------------------------
+
+
         similarities[ (userid, i) ] = sim
+        similarities[ (i, userid) ] = sim
         top_k.append( (i, sim) )
 
 
-    top_k = sorted(top_k, key=lambda x: x[1], reverse=True)[:TOP_K]
+    top_k = sorted(top_k, key=lambda x: x[1], reverse=True)
 
     return top_k
 
@@ -343,36 +384,56 @@ def topK_CosineSimilarity(M_CSC, dots, similarities, userid, movieid):
 
 
 
-def topK_JaccardSimilarity(M_CSC, similarities, userid, movieid):
+def topK_JaccardSimilarity(M, similarities, userid, movieid, hybrid, M_profiles):
     
     top_k = []
     sim = 0.0
 
+    # extract userid vector from utility matrix
+    userid_vect = set(M.getrow(userid).nonzero()[1])
+
+    # extract feature set-vector from profile (rows are users, columns are features) --> used only if hybrid = True
+    user_prof_vect = set(M_profiles.getrow(userid).nonzero()[1])
+
     # Jaccard similarity
-    for i in M_CSC.getcol(movieid).nonzero()[0]:
+    for i in M.getcol(movieid).nonzero()[0]:
 
         if (i == userid):
             continue
 
         if (userid, i) in similarities:
             sim = similarities[ (userid, i) ]
+            continue
 
         elif (i, userid) in similarities:
             sim = similarities[ (i, userid) ]
+            continue
 
         else:
-            userid_vector = set(M_CSC.getrow(userid).nonzero()[1])
-            i_vector = set(M_CSC.getrow(i).nonzero()[1])
-            union = len(userid_vector.union(i_vector))
-            intersection = len(userid_vector.intersection(i_vector))
+            i_vect = set(M.getrow(i).nonzero()[1])
+            union = len(userid_vect.union(i_vect))
+            intersection = len(userid_vect.intersection(i_vect))
             sim = intersection / float(union)
-            similarities[ (i, userid) ] = sim
 
 
-        top_k.append((j, sim))
+        # if hybrid mode is selected, we compute linear combination between cf similarity and content-based similarity  
+        if hybrid:
+            cb_sim = 0.0
+            i_prof_vect = set(M_profiles.getrow(i).nonzero()[1])
+            num = len(user_prof_vect.intersection(i_prof_vect))
+            den = len(user_prof_vect.union(i_prof_vect))
+            cb_sim = num / float(den)
+            sim = _P * cb_sim + (1 - _P) * sim
+        # --------------------------------------------------------------------
+            
 
-    # top 10 users similar to userid that have rated movieid
-    top_k = sorted(top_k, key=lambda x: x[1], reverse=True)[:TOP_K]
+
+        similarities[ (userid, i) ] = sim  
+        similarities[ (i, userid) ] = sim  
+        top_k.append((i, sim))
+
+    # top users similar to userid that have rated movieid
+    top_k = sorted(top_k, key=lambda x: x[1], reverse=True)
 
     return top_k
 
@@ -392,12 +453,17 @@ if __name__ == '__main__':
 
     parser.add_argument("filepath", type=str, help="file source path (string)")
     parser.add_argument("--sim", type=str, nargs="?", const=1, default=PEARSON_CORR, choices=[COSINE_SIMILARITY, JACCARD_SIMILARITY, PEARSON_CORR], help="similarity measure (string)")
+    parser.add_argument("--hybrid", type=bool, nargs="?", const=1, default=False, help="Mix collaborative-filtering and content-based similarities")
+    parser.add_argument("--p", type=float, help="Linear combination factor")
 
 
     args = parser.parse_args()
 
+    _P = args.p if args.p else _P
 
-    collaborativeFilteringItemItem(args.filepath, args.sim)
+
+    collaborativeFilteringUserUser(args.filepath, args.sim, args.hybrid)
+
 
 
 

@@ -21,7 +21,7 @@ import json
 BASE_URL = "http://www.omdbapi.com/?"
 ID_PREFIX = "tt"
 SEP = ","
-FIELDS = ["Title", "Year", "Director", "Actors", "Genre", "Language", "Country", "Plot"]
+FIELDS = ["Title", "Year", "Director", "Actors", "Genre", "Language", "Country", "Awards", "Plot"]
 
 PP = pprint.PrettyPrinter(indent=4)
 
@@ -46,7 +46,7 @@ def parseOutputFolderPath(filepath):
 def getMetadata(filepath):
 
 	out_folder = parseOutputFolderPath(filepath)
-	out_file = io.open(out_folder + "metadata.csv", "w", encoding="ISO-8859-1")
+	out_file = io.open(out_folder + "metadata_full.csv", "w", encoding="ISO-8859-1")
 
 	with open(filepath, "r") as file:
 
@@ -69,7 +69,7 @@ def getMetadata(filepath):
 			
 
 			try:
-				url = BASE_URL + "i={0}{1}&type=movie&plot=short&r=json".format(ID_PREFIX, tokens[1])
+				url = BASE_URL + "i={0}{1}&type=movie&plot=full&r=json".format(ID_PREFIX, tokens[1])
 				response = requests.get(url)
 
 				json_obj = json.loads(response.text)
