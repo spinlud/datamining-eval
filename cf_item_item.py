@@ -30,17 +30,17 @@ from progressbar import AnimatedMarker, Bar, BouncingBar, Counter, ETA, \
 widgets = ['Progress: ', Percentage(), ' ', Bar(marker=RotatingMarker()), ' ', ETA()]
 
 
-_N = 671
-_M = 164979
+_N = 671 + 1
+_M = 164979 + 1
 NUM_FOLDS = 5
-_K = [2, 5, 10]
-TOP_K = 10
+_K = [2, 5, 10, 20]
 TRAIN_PREFIX = "_train_"
 TEST_PREFIX = "_test_"
 EXT = ".csv"
 COSINE_SIMILARITY = "cos"
 JACCARD_SIMILARITY = "jac"
 PEARSON_CORR = "pears"
+_P = 0.25
 
 
 
@@ -71,23 +71,32 @@ def parseFileName(filepath):
 
 
 
-def collaborativeFilteringItemItem(filepath, similarity):
+def collaborativeFilteringItemItem(filepath, similarity, hybrid=False):
 
     output_folder = parseOutputFolderPath(filepath)
     base_file_name = parseFileName(filepath)
 
-    out_file_base = "predictions_item_" + similarity 
+
+    if hybrid:
+    	out_file_base = "predictions_item_hybrid_" + similarity 
+    else:
+    	out_file_base = "predictions_item_" + similarity 
+
     out_file = open(output_folder + "output/" + out_file_base + EXT, "w")
 
     avg_rmse_dict = defaultdict(float)
     avg_mae_dict = defaultdict(float)
 
 
+    # used only when hybrid = true ---------------------------------------------
+    M_profiles = spio.loadmat(output_folder + "output/movie_profiles.mat")["M"]
+    dots_profiles = M_profiles.dot(M_profiles.transpose())
+    # --------------------------------------------------------------------------
+    
 
-
+    # for each fold
     for fold_index in xrange(1, NUM_FOLDS + 1):
-    # for fold_index in xrange(5, 6):    
-
+    	
         M = lil_matrix( (_N, _M) )
         M_NORM = lil_matrix( (_N, _M) )
         avg_users = defaultdict(float)
@@ -121,8 +130,8 @@ def collaborativeFilteringItemItem(filepath, similarity):
 
                 tokens = line.strip().split(",")
 
-                userid = int(tokens[0], 10) - 1
-                movieid = int(tokens[1], 10) - 1
+                userid = int(tokens[0], 10)
+                movieid = int(tokens[1], 10)
                 score = float(tokens[2])
 
                 M[userid, movieid] = score
@@ -191,8 +200,8 @@ def collaborativeFilteringItemItem(filepath, similarity):
                 tokens = line.strip().split(",")
                 
 
-                userid = int(tokens[0], 10) - 1
-                movieid = int(tokens[1], 10) - 1
+                userid = int(tokens[0], 10)
+                movieid = int(tokens[1], 10)
                 score = float(tokens[2])
                 count += 1
                 pbar.update(count)
@@ -201,10 +210,10 @@ def collaborativeFilteringItemItem(filepath, similarity):
 
 
                 if similarity == JACCARD_SIMILARITY:
-                    top_k = topK_JaccardSimilarity(M_CSC, similarities, userid, movieid) 
+                    top_k = topK_JaccardSimilarity(M_CSC, similarities, userid, movieid, hybrid, dots_profiles) 
                     
                 else:
-                    top_k = topK_CosineSimilarity(M_CSC, dots, similarities, userid, movieid)
+                    top_k = topK_CosineSimilarity(M_CSC, dots, similarities, userid, movieid, hybrid, dots_profiles)
                     
 
 
@@ -270,7 +279,11 @@ def collaborativeFilteringItemItem(filepath, similarity):
 
 
     # average rmse on number of folds for each neighbour size and write to disk
-    with open(output_folder + "output/" + out_file_base + "_eval" + EXT, "w") as file:
+    eval_out_path = output_folder + "output/" + out_file_base
+    eval_out_path += "_hybrid_eval" if hybrid else "_eval"
+    eval_out_path += EXT
+
+    with open(eval_out_path, "w") as file:
 
         file.write("k" + "\t" + "RMSE" + "\t" + "MAE" + "\n")
 
@@ -292,7 +305,7 @@ def collaborativeFilteringItemItem(filepath, similarity):
 
 
 
-def topK_CosineSimilarity(M_CSC, dots, similarities, userid, movieid):
+def topK_CosineSimilarity(M_CSC, dots, similarities, userid, movieid, hybrid, dots_profiles):
 
     top_k = []
     item_sq_norm = dots[movieid, movieid]
@@ -326,11 +339,24 @@ def topK_CosineSimilarity(M_CSC, dots, similarities, userid, movieid):
             continue
 
         sim = dots[movieid, j] / math.sqrt(item_sq_norm * j_sq_norm)
+
+
+        # if hybrid mode is selected, we compute linear combination between cf similarity and content-based similarity
+        if hybrid:
+        	cb_sim = 0.0
+        	num = dots_profiles[movieid, j]
+        	if num != 0:
+        		den = math.sqrt(dots_profiles[movieid, movieid] * dots_profiles[j, j])
+        		cb_sim = num / den
+
+        	sim = _P * cb_sim + (1 - _P) * sim
+        # --------------------------------------------------------------------
+
         similarities[ (movieid, j) ] = sim
         top_k.append( (j, sim) )
 
 
-    top_k = sorted(top_k, key=lambda x: x[1], reverse=True)[:TOP_K]
+    top_k = sorted(top_k, key=lambda x: x[1], reverse=True)
 
     return top_k
 
@@ -369,7 +395,7 @@ def topK_JaccardSimilarity(M_CSC, similarities, userid, movieid):
         top_k.append((j, sim))
 
     # top 10 items similar to movieid rated by userid
-    top_k = sorted(top_k, key=lambda x: x[1], reverse=True)[:TOP_K]
+    top_k = sorted(top_k, key=lambda x: x[1], reverse=True)
 
     return top_k
 
@@ -389,12 +415,16 @@ if __name__ == '__main__':
 
     parser.add_argument("filepath", type=str, help="file source path (string)")
     parser.add_argument("--sim", type=str, nargs="?", const=1, default=PEARSON_CORR, choices=[COSINE_SIMILARITY, JACCARD_SIMILARITY, PEARSON_CORR], help="similarity measure (string)")
+    parser.add_argument("--hybrid", type=bool, nargs="?", const=1, default=False, help="Mix collaborative-filtering and content-based similarities")
+    parser.add_argument("--p", type=float, help="Linear combination factor")
 
 
     args = parser.parse_args()
 
+    _P = args.p if args.p else _P
 
-    collaborativeFilteringItemItem(args.filepath, args.sim)
+
+    collaborativeFilteringItemItem(args.filepath, args.sim, args.hybrid)
 
 
 

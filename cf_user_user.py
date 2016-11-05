@@ -3,9 +3,9 @@
 
 #################################################################################
 #
-#   file:           cf_user_user.py
+#   file:           cf_item_item.py
 #   author:         Ludovico Fabbri 1197400
-#   description:    user-user collaborative filtering
+#   description:    item-item collaborative filtering
 #
 #
 #################################################################################
@@ -30,14 +30,17 @@ from progressbar import AnimatedMarker, Bar, BouncingBar, Counter, ETA, \
 widgets = ['Progress: ', Percentage(), ' ', Bar(marker=RotatingMarker()), ' ', ETA()]
 
 
-
-
+_N = 671 + 1
+_M = 164979 + 1
+NUM_FOLDS = 5
+_K = [2, 5, 10]
 TOP_K = 10
 TRAIN_PREFIX = "_train_"
 TEST_PREFIX = "_test_"
 EXT = ".csv"
-COSINE_SIMILARITY = "cosine"
-JACCARD_SIMILARITY = "jaccard"
+COSINE_SIMILARITY = "cos"
+JACCARD_SIMILARITY = "jac"
+PEARSON_CORR = "pears"
 
 
 
@@ -68,24 +71,30 @@ def parseFileName(filepath):
 
 
 
-def collaborativeFilteringItemItem(filepath, rows, cols, num_folds, similarity):
+def collaborativeFilteringItemItem(filepath, similarity):
 
     output_folder = parseOutputFolderPath(filepath)
     base_file_name = parseFileName(filepath)
-    out_path = output_folder + "output/predictions_user_user" + EXT
-    out_file = open(out_path, "w")
+
+    out_file_base = "predictions_user_" + similarity 
+    out_file = open(output_folder + "output/" + out_file_base + EXT, "w")
+
+    avg_rmse_dict = defaultdict(float)
+    avg_mae_dict = defaultdict(float)
 
 
 
 
-    for fold_index in xrange(1, num_folds + 1):
+    for fold_index in xrange(1, NUM_FOLDS + 1):
     # for fold_index in xrange(5, 6):    
 
-        M = lil_matrix( (rows, cols) )
-        M_NORM = lil_matrix( (rows, cols) )
+        M = lil_matrix( (_N, _M) )
+        M_NORM = lil_matrix( (_N, _M) )
         avg_users = defaultdict(float)
         avg_movies = defaultdict(float)
+
         rmse_dict = defaultdict(float)
+        mae_dict = defaultdict(float)
         mu = 0.0
         similarities = defaultdict(float)
 
@@ -112,8 +121,8 @@ def collaborativeFilteringItemItem(filepath, rows, cols, num_folds, similarity):
 
                 tokens = line.strip().split(",")
 
-                userid = int(tokens[0], 10) - 1
-                movieid = int(tokens[1], 10) - 1
+                userid = int(tokens[0], 10)
+                movieid = int(tokens[1], 10)
                 score = float(tokens[2])
 
                 M[userid, movieid] = score
@@ -137,13 +146,15 @@ def collaborativeFilteringItemItem(filepath, rows, cols, num_folds, similarity):
                 avg_movies[i] /= float(count_movies[i])
 
 
-            pbar = ProgressBar(widgets=widgets, maxval=rows).start()
+            pbar = ProgressBar(widgets=widgets, maxval=_N).start()
 
-            # normalize matrix by user mean
-            for i in xrange(rows):
-                for j in M.getrow(i).nonzero()[1]:
-                    M_NORM[i, j] = M[i, j] - avg_users[i]
-                pbar.update(i)
+
+            if similarity == PEARSON_CORR:
+                # normalize matrix
+                for i in xrange(_N):
+                    for j in M.getrow(i).nonzero()[1]:
+                        M_NORM[i, j] = M[i, j] - avg_users[j]
+                    pbar.update(i)
 
 
             pbar.finish()
@@ -166,7 +177,6 @@ def collaborativeFilteringItemItem(filepath, rows, cols, num_folds, similarity):
         print test_path
 
         M_CSC = M.tocsc()
-        # M_NORM_TRANSP = M_NORM.transpose()
         dots = M_NORM.dot(M_NORM.transpose())
         count = 0.0
 
@@ -180,8 +190,8 @@ def collaborativeFilteringItemItem(filepath, rows, cols, num_folds, similarity):
                 tokens = line.strip().split(",")
                 
 
-                userid = int(tokens[0], 10) - 1
-                movieid = int(tokens[1], 10) - 1
+                userid = int(tokens[0], 10)
+                movieid = int(tokens[1], 10)
                 score = float(tokens[2])
                 count += 1
                 pbar.update(count)
@@ -189,55 +199,66 @@ def collaborativeFilteringItemItem(filepath, rows, cols, num_folds, similarity):
 
 
 
-                if similarity == COSINE_SIMILARITY:
-                    top_k = topK_CosineSimilarity(M_CSC, dots, similarities, userid, movieid)
-
-                else:
+                if similarity == JACCARD_SIMILARITY:
                     top_k = topK_JaccardSimilarity(M_CSC, similarities, userid, movieid) 
-                    # print str(len(similarities))                   
+                    
+                else:
+                    top_k = topK_CosineSimilarity(M_CSC, dots, similarities, userid, movieid)
+                    
 
 
                 r_xi = 0.0
 
 
-                num = 0.0
-                den = 0.0
-                b_xi = avg_users[userid] + avg_movies[movieid] - mu
 
-                for t in top_k:
-                    curr_movieid = t[0]
-                    sim = t[1]
-                    b_xj = avg_users[userid] + avg_movies[curr_movieid] - mu
+                for k in _K:
+                    num = 0.0
+                    den = 0.0
+                    b_xi = avg_users[userid] + avg_movies[movieid] - mu
+                    # b_xi = avg_users[userid]
 
-                    num += sim * (M[userid, curr_movieid] - b_xj)
-                    den += sim
+                    for t in top_k[:k]:
+                        y_id = t[0]
+                        sim = t[1]
+                        b_yi = avg_users[y_id] + avg_movies[movieid] - mu
+                        # b_yi = avg_users[y_id]
 
-                if den != 0:
-                    r_xi = b_xi + (num / float(den))
-                else:
-                    r_xi = b_xi
+                        num += sim * (M[y_id, movieid] - b_yi)
+                        den += abs(sim)
 
-
-                # clamp prediction in [1,5]
-                if r_xi < 1:
-                    r_xi = 1.0
-                if r_xi > 5:
-                    r_xi = 5.0
+                    if den != 0:
+                        r_xi = b_xi + (num / float(den))
+                    else:
+                        r_xi = b_xi
 
 
-                # update rmse
-                error = score - r_xi
-                rmse_dict[fold_index] += error**2
+                    # clamp prediction in [1,5]
+                    if r_xi < 1:
+                        r_xi = 1.0
+                    if r_xi > 5:
+                        r_xi = 5.0
+
+
+                    # update rmse and mae
+                    error = r_xi - score
+                    rmse_dict[k] += error**2
+                    mae_dict[k] = abs(error)
 
                 # write predictions only for first test (fold)
                 if (fold_index == 1):
                     out_file.write(tokens[0] + '\t' + tokens[1] + '\t' + str(r_xi) + '\n')
 
 
-            # update rmse
-            rmse_dict[fold_index] = math.sqrt(rmse_dict[fold_index] / float(count))
 
-            out_file.close()
+
+        # update rmse and mae
+        for k in _K:
+            rmse_dict[k] = math.sqrt(rmse_dict[k] / float(count))
+            mae_dict[k] = math.sqrt(mae_dict[k] / float(count))
+            avg_rmse_dict[k] += rmse_dict[k]
+            avg_mae_dict[k] += mae_dict[k]
+
+        out_file.close()
 
 
         pbar.finish()
@@ -251,16 +272,18 @@ def collaborativeFilteringItemItem(filepath, rows, cols, num_folds, similarity):
 
 
 
-    # average rmse on number of folds
-    avg_rmse = 0.0
-    for key in rmse_dict:
-        avg_rmse += rmse_dict[key]
-    avg_rmse /= float(num_folds)
+    # average rmse on number of folds for each neighbour size and write to disk
+    with open(output_folder + "output/" + out_file_base + "_eval" + EXT, "w") as file:
+
+        file.write("k" + "\t" + "RMSE" + "\t" + "MAE" + "\n")
+
+        for k in _K:
+            avg_rmse_dict[k] /= 5.0
+            file.write(str(k) + "\t" + str(avg_rmse_dict[k]) + "\t" + str(avg_mae_dict[k]) + "\n")
 
 
-    # write rmse
-    with open(output_folder + "output/rmse_user_user" + EXT, "w") as file:
-        file.write(str(TOP_K) + "\t" + str(avg_rmse))
+
+        
 
     
 
@@ -323,7 +346,7 @@ def topK_CosineSimilarity(M_CSC, dots, similarities, userid, movieid):
 def topK_JaccardSimilarity(M_CSC, similarities, userid, movieid):
     
     top_k = []
-    sim = 0
+    sim = 0.0
 
     # Jaccard similarity
     for i in M_CSC.getcol(movieid).nonzero()[0]:
@@ -348,7 +371,7 @@ def topK_JaccardSimilarity(M_CSC, similarities, userid, movieid):
 
         top_k.append((j, sim))
 
-    # top 10 items similar to movieid rated by userid
+    # top 10 users similar to userid that have rated movieid
     top_k = sorted(top_k, key=lambda x: x[1], reverse=True)[:TOP_K]
 
     return top_k
@@ -368,15 +391,13 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     parser.add_argument("filepath", type=str, help="file source path (string)")
-    parser.add_argument("utility_rows", type=int, help="utility matrix # rows (int)")
-    parser.add_argument("utility_columns", type=int, help="utility matrix # columns (int)")
-    parser.add_argument("num_folds", type=int, help="cross-validation # folds (int)")
-    parser.add_argument("similarity", type=str, nargs="?", const=1, default=COSINE_SIMILARITY, help="similarity measure (string)")
+    parser.add_argument("--sim", type=str, nargs="?", const=1, default=PEARSON_CORR, choices=[COSINE_SIMILARITY, JACCARD_SIMILARITY, PEARSON_CORR], help="similarity measure (string)")
 
 
     args = parser.parse_args()
 
-    collaborativeFilteringItemItem(args.filepath, args.utility_rows, args.utility_columns, args.num_folds, args.similarity)
+
+    collaborativeFilteringItemItem(args.filepath, args.sim)
 
 
 

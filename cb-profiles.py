@@ -28,8 +28,8 @@ from collections import OrderedDict
 
 OUT_FOLDER = "datasets/ml-latest-small/output/"
 SRC_FOLDER = "datasets/ml-latest-small/"
-N = 671
-M = 164979
+_N = 671 + 1
+_M = 164979 + 1
 
 
 
@@ -137,7 +137,7 @@ def buildMoviesProfiles():
 	actors_dict = OrderedDict()
 	genres_dict = OrderedDict()
 	tags_dict = OrderedDict()
-	index = 0
+	index = 1
 
 	with io.open(OUT_FOLDER + "unique_directors.csv", "r", encoding="ISO-8859-1") as file:
 		for line in file:
@@ -167,7 +167,7 @@ def buildMoviesProfiles():
 
 
 	num_features = len(directors_dict) + len(actors_dict) + len(genres_dict) + len(tags_dict)	
-	M_movies = lil_matrix( (M, num_features) )		
+	M_movies = lil_matrix( (_M, num_features + 1) )		# + 1 to match index with the all_features.csv file		
 	print M_movies._shape
 	
 
@@ -179,7 +179,7 @@ def buildMoviesProfiles():
 
 		for line in file:
 			tokens = line.strip().split("\t")
-			movieid = int(tokens[0], 10) - 1
+			movieid = int(tokens[0], 10)
 			directors = [x.strip() for x in tokens[5].split(",")]
 			actors = [x.strip() for x in tokens[6].split(",")]
 
@@ -200,7 +200,7 @@ def buildMoviesProfiles():
 		for line in file:
 
 			tokens = line.strip().split(",")
-			movieid = int(tokens[0], 10) - 1
+			movieid = int(tokens[0], 10)
 			genres = [x.strip() for x in tokens[len(tokens) - 1].split("|")]
 
 			for x in genres:
@@ -221,7 +221,7 @@ def buildMoviesProfiles():
 
 		for line in file:
 			tokens = line.strip().split(",")
-			movieid= int(tokens[1], 10) - 1
+			movieid= int(tokens[1], 10)
 			tag = tokens[2]
 
 			M_movies[movieid, tags_dict[tag]] = 1.0
@@ -245,8 +245,8 @@ def buildMoviesProfiles():
 
 def buildUserProfiles():
 
-	M_ = lil_matrix( (N, M) )
-	M_NORM = lil_matrix( (N, M) )
+	M_ = lil_matrix( (_N, _M) )
+	M_NORM = lil_matrix( (_N, _M) )
 	avg_users = defaultdict(float)
 	avg_movies = defaultdict(float)
 	count_users = defaultdict(int)
@@ -258,8 +258,8 @@ def buildUserProfiles():
 
 			tokens = line.strip().split(",")
 
-			userid = int(tokens[0], 10) - 1
-			movieid = int(tokens[1], 10) - 1
+			userid = int(tokens[0], 10) 
+			movieid = int(tokens[1], 10) 
 			score = float(tokens[2])
 
 			M_[userid, movieid] = score
@@ -279,7 +279,7 @@ def buildUserProfiles():
 
 
 	# normalize matrix (by user average --> from book)
-	for i in xrange(N):
+	for i in xrange(_N):
 		for j in M_.getrow(i).nonzero()[1]:
 			# M_NORM[i, j] = M_[i, j] - avg_movies[j]
 			# M_NORM[i, j] = M_[i, j] - avg_users[i]
@@ -288,13 +288,13 @@ def buildUserProfiles():
 
 
 	M_movies = spio.loadmat(OUT_FOLDER + "movie_profiles")["M"].tolil()
-	M_users = lil_matrix((N, M_movies._shape[1]))
+	M_users = lil_matrix((_N, M_movies._shape[1]))
 	
 	print M_movies._shape
 	print M_users._shape
 
 	# build profiles
-	for i in xrange(N):
+	for i in xrange(_N):
 
 		count = 0
 
@@ -342,21 +342,11 @@ def buildUserProfiles():
 ###############################################
 if __name__ == '__main__':
 
-	# parser = argparse.ArgumentParser()
-
-	# parser.add_argument("metadata_filepath", type=str, help="metadata file source path (string)")
-	# parser.add_argument("tags_filepath", type=str, help="tags file source path (string)")
-	
-
-	# args = parser.parse_args()
-
-	# build_unique_sorted_files(args.metadata_filepath, args.tags_filepath)
-
 
 
 	# build_unique_sorted_files()
 
-	# buildMoviesProfiles()
+	buildMoviesProfiles()
 
 	buildUserProfiles()
 
