@@ -127,9 +127,7 @@ def collaborativeFilteringUserUser(filepath, similarity, hybrid=False):
             count_movies = defaultdict(int)
 
             for line in file:
-
-                tokens = line.strip().split(",")
-
+                tokens = line.strip().split("\t")
                 userid = int(tokens[0], 10)
                 movieid = int(tokens[1], 10)
                 score = float(tokens[2])
@@ -164,23 +162,7 @@ def collaborativeFilteringUserUser(filepath, similarity, hybrid=False):
             counts = np.diff(M_NORM.indptr)
             means = np.nan_to_num(sums / counts)
             M_NORM.data -= np.repeat(means, counts)
-            M_NORM = M_NORM.tolil()    
-
-
-
-
-        # pbar = ProgressBar(widgets=widgets, maxval=_N).start()
-
-
-        # if similarity == PEARSON_CORR:
-        #     # normalize matrix
-        #     for i in xrange(_N):
-        #         for j in M.getrow(i).nonzero()[1]:
-        #             M_NORM[i, j] = M[i, j] - avg_users[j]
-        #         pbar.update(i)
-
-
-        # pbar.finish()
+             
 
         print "..done"
 
@@ -197,21 +179,28 @@ def collaborativeFilteringUserUser(filepath, similarity, hybrid=False):
         print "Test Phase.."
         test_path = output_folder + base_file_name + TEST_PREFIX + str(fold_index) + EXT
         
-        print test_path
+        
+        if similarity == JACCARD_SIMILARITY:
+            users_vectors = defaultdict()
+            for i in xrange(_N):
+                users_vectors[i] = set(M.getrow(i).nonzero()[1]) 
 
-        dots = M_NORM.dot(M_NORM.transpose())
-        count = 0.0
+            dots = False    # placeholder   
+
+        else:
+            dots = M_NORM.dot(M_NORM.transpose())
+            users_vectors = False    # placeholder
+
+
 
         pbar = ProgressBar(widgets=widgets, maxval=21000).start()
+        count = 0.0
 
 
         with open(test_path, "r") as file:
 
             for line in file:
-
-                tokens = line.strip().split(",")
-                
-
+                tokens = line.strip().split("\t")
                 userid = int(tokens[0], 10)
                 movieid = int(tokens[1], 10)
                 score = float(tokens[2])
@@ -220,9 +209,8 @@ def collaborativeFilteringUserUser(filepath, similarity, hybrid=False):
 
 
 
-
                 if similarity == JACCARD_SIMILARITY:
-                    top_k = topK_JaccardSimilarity(M, similarities, userid, movieid, hybrid, dots_profiles) 
+                    top_k = topK_JaccardSimilarity(M, similarities, userid, movieid, users_vectors, hybrid, M_profiles) 
                     
                 else:
                     top_k = topK_CosineSimilarity(M, dots, similarities, userid, movieid, hybrid, M_profiles)
@@ -264,7 +252,7 @@ def collaborativeFilteringUserUser(filepath, similarity, hybrid=False):
                     # update rmse and mae
                     error = r_xi - score
                     rmse_dict[k] += error**2
-                    mae_dict[k] = abs(error)
+                    mae_dict[k] += abs(error)
 
                 # write predictions only for first test (fold)
                 if (fold_index == 1):
@@ -301,6 +289,7 @@ def collaborativeFilteringUserUser(filepath, similarity, hybrid=False):
 
         for k in _K:
             avg_rmse_dict[k] /= 5.0
+            avg_mae_dict[k] /= 5.0
             file.write(str(k) + "\t" + str(avg_rmse_dict[k]) + "\t" + str(avg_mae_dict[k]) + "\n")
 
 
@@ -334,11 +323,6 @@ def topK_CosineSimilarity(M, dots, similarities, userid, movieid, hybrid, dots_p
 
         if (userid, i) in similarities:
             sim = similarities[ (userid, i) ]
-            top_k.append( (i, sim) )
-            continue
-
-        if (i, userid) in similarities:
-            sim = similarities[ (i, userid) ]
             top_k.append( (i, sim) )
             continue
 
@@ -384,7 +368,7 @@ def topK_CosineSimilarity(M, dots, similarities, userid, movieid, hybrid, dots_p
 
 
 
-def topK_JaccardSimilarity(M, similarities, userid, movieid, hybrid, M_profiles):
+def topK_JaccardSimilarity(M, similarities, userid, movieid, users_vectors, hybrid, M_profiles, tfidf = False, dots_tfidf = False):
     
     top_k = []
     sim = 0.0
@@ -401,18 +385,13 @@ def topK_JaccardSimilarity(M, similarities, userid, movieid, hybrid, M_profiles)
         if (i == userid):
             continue
 
-        if (userid, i) in similarities:
+        elif (userid, i) in similarities:
             sim = similarities[ (userid, i) ]
             continue
 
-        elif (i, userid) in similarities:
-            sim = similarities[ (i, userid) ]
-            continue
-
         else:
-            i_vect = set(M.getrow(i).nonzero()[1])
-            union = len(userid_vect.union(i_vect))
-            intersection = len(userid_vect.intersection(i_vect))
+            union = len(users_vectors[userid].union(users_vectors[i]))
+            intersection = len(users_vectors[userid].intersection(users_vectors[i]))
             sim = intersection / float(union)
 
 

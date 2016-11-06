@@ -12,6 +12,8 @@
 
 
 import io
+import time
+import csv
 import argparse
 import math
 import numpy as np
@@ -41,6 +43,10 @@ widgets = ['Progress: ', Percentage(), ' ', Bar(marker=RotatingMarker()), ' ', E
 
 _N = 671 + 1
 _M = 164979 + 1
+
+# _N = 943 + 1
+# _M = 1682 + 1
+
 NUM_FOLDS = 5
 _K = [2, 5, 10, 20]
 TRAIN_PREFIX = "_train_"
@@ -51,7 +57,7 @@ JACCARD_SIMILARITY = "jac"
 PEARSON_CORR = "pears"
 TF_IDF = "tfidf"
 NONE = "none"
-_P = 0.25
+_P = 0.5
 
 
 
@@ -84,26 +90,48 @@ def build_tfidf_documents(src_folder):
 
 	movie_tfidf_profiles = OrderedDict()
 
-	# first add metadata
-	with io.open(src_folder + "ml-latest-small_metadata.csv", "r", encoding="ISO-8859-1") as file:
+	# first add metadata 
+	with io.open(src_folder + "latest_small_metadata_full.csv", "r", encoding="ISO-8859-1") as file:
 		file.readline()		# skip header
 		for line in file:
 			tokens = line.strip().split("\t")
 			movieid = int(tokens[0], 10)
-			tokens = tokens[3:10]	# exclude movie description
+			tokens = tokens[3:]	
 			text = " ".join(tokens)
 			movie_tfidf_profiles[movieid] = text
 
 			
 
-	# then add folksonomy
+	# add folksonomy from small dataset
 	with io.open(src_folder + "tags.csv", "r", encoding="ISO-8859-1") as file:
 		file.readline()		# skip header
 		for line in file:
 			tokens = line.strip().split(",")
 			movieid = int(tokens[1], 10)
 			tag = tokens[2]
-			movie_tfidf_profiles[movieid] += " " + tag
+			try:
+				movie_tfidf_profiles[movieid] += " " + tag
+			except Exception as e:
+				print line
+				print e
+
+	# add folksonomy from big dataset
+	with io.open("datasets/ml-20m/tags.csv", "r", encoding="ISO-8859-1") as file:
+		file.readline()		# skip header
+		for line in file:
+			tokens = line.strip().split(",")
+			movieid = int(tokens[1], 10)
+			tag = tokens[2]
+			try:
+				if movieid in movie_tfidf_profiles:
+					movie_tfidf_profiles[movieid] += " " + tag
+			except Exception as e:
+				print line
+				print e
+
+	
+
+
 
 
 	# private function used by TfidfVectorizer		
@@ -121,10 +149,14 @@ def build_tfidf_documents(src_folder):
 
 	# create an array of _M empty strings
 	documents = [""] * _M
+
+
 	for movieid in movie_tfidf_profiles:
 		documents[movieid] = movie_tfidf_profiles[movieid]
 
-	# print len(documents)
+	
+	# print documents[2571]
+	# exit()
 
 	
 	# doc1 = movie_tfidf_profiles[1270]
@@ -147,6 +179,8 @@ def build_tfidf_documents(src_folder):
 
 def collaborativeFilteringItemItem(filepath, similarity, hybrid, tfidf):
 
+	print _P
+
 	src_folder = parseOutputFolderPath(filepath)
 	base_file_name = parseFileName(filepath)
 
@@ -166,8 +200,13 @@ def collaborativeFilteringItemItem(filepath, similarity, hybrid, tfidf):
 
 
 	# used only when hybrid = True ---------------------------------------------
-	M_profiles = spio.loadmat(src_folder + "output/movie_profiles.mat")["M"]
-	dots_profiles = M_profiles.dot(M_profiles.transpose())
+	if hybrid:
+		M_profiles = spio.loadmat(src_folder + "output/movie_profiles.mat")["M"]
+		dots_profiles = M_profiles.dot(M_profiles.transpose())
+	else:
+		M_profiles = False 		# placeholder
+		dots_profiles = False 	# placeholder
+
 	# --------------------------------------------------------------------------
 
 
@@ -217,7 +256,7 @@ def collaborativeFilteringItemItem(filepath, similarity, hybrid, tfidf):
 
 			for line in file:
 
-				tokens = line.strip().split(",")
+				tokens = line.strip().split("\t")
 
 				userid = int(tokens[0], 10)
 				movieid = int(tokens[1], 10)
@@ -258,7 +297,7 @@ def collaborativeFilteringItemItem(filepath, similarity, hybrid, tfidf):
 			means = np.nan_to_num(sums / counts)
 			M_NORM.data -= np.repeat(means, counts)
 			M_NORM = M_NORM.transpose()
-			M_NORM = M_NORM.tolil()
+			# M_NORM = M_NORM.tolil()
 		
 
 
@@ -287,22 +326,36 @@ def collaborativeFilteringItemItem(filepath, similarity, hybrid, tfidf):
 		
 		print "Test Phase.."
 		test_path = src_folder + base_file_name + TEST_PREFIX + str(fold_index) + EXT
+		M = M.tocsc()
+
+		# print test_path
+
+		
+		if similarity != JACCARD_SIMILARITY:
+			dots = M_NORM.transpose().dot(M_NORM)
+		else:
+			dots = False 	# placeholder
+
+
+		item_vectors = defaultdict()	
+
+		# used only for jaccard
+		if similarity == JACCARD_SIMILARITY:	
+			for j in xrange(_M):
+				item_vectors[j] = set(M.getcol(j).nonzero()[0])	
 		
 
-		print test_path
 
-		
-		dots = M_NORM.transpose().dot(M_NORM)
-		count = 0.0
 
 		pbar = ProgressBar(widgets=widgets, maxval=21000).start()
+		count = 0.0
 
 
 		with open(test_path, "r") as file:
 
 			for line in file:
 
-				tokens = line.strip().split(",")
+				tokens = line.strip().split("\t")
 				
 
 				userid = int(tokens[0], 10)
@@ -315,7 +368,7 @@ def collaborativeFilteringItemItem(filepath, similarity, hybrid, tfidf):
 
 
 				if similarity == JACCARD_SIMILARITY:
-					top_k = topK_JaccardSimilarity(M, similarities, userid, movieid, hybrid, M_profiles, tfidf, dots_tfidf) 
+					top_k = topK_JaccardSimilarity(M, similarities, userid, movieid, hybrid, item_vectors, M_profiles, tfidf, dots_tfidf) 
 					
 				else:
 					top_k = topK_CosineSimilarity(M, dots, similarities, userid, movieid, hybrid, dots_profiles, tfidf, dots_tfidf)
@@ -431,11 +484,6 @@ def topK_CosineSimilarity(M, dots, similarities, userid, movieid, hybrid, dots_p
 			top_k.append( (j, sim) )
 			continue
 
-		if (j, movieid) in similarities:
-			sim = similarities[ (j, movieid) ]
-			top_k.append( (j, sim) )
-			continue
-
 		if movieid_sq_norm == 0:
 			similarities[ (movieid, j) ] = -1.0
 			top_k.append( (j, -1.0) )
@@ -488,7 +536,7 @@ def topK_CosineSimilarity(M, dots, similarities, userid, movieid, hybrid, dots_p
 
 
 
-def topK_JaccardSimilarity(M, similarities, userid, movieid, hybrid, M_profiles, tfidf, dots_tfidf):
+def topK_JaccardSimilarity(M, similarities, userid, movieid, hybrid, item_vectors, M_profiles, tfidf, dots_tfidf):
 	
 	top_k = []
 	sim = 0
@@ -498,7 +546,7 @@ def topK_JaccardSimilarity(M, similarities, userid, movieid, hybrid, M_profiles,
 		movieid_prof_vect = set(M_profiles.getrow(movieid).nonzero()[1])
 
 	# extract movieid vector from utility matrix
-	movieid_vect = set(M.getcol(movieid).nonzero()[0])
+	# movieid_vect = set(M.getcol(movieid).nonzero()[0])
 
 	# Jaccard similarity
 	for j in M.getrow(userid).nonzero()[1]:
@@ -515,10 +563,14 @@ def topK_JaccardSimilarity(M, similarities, userid, movieid, hybrid, M_profiles,
 			continue
 
 		else:			
-			j_vector = set(M.getcol(j).nonzero()[0])
-			union = len(movieid_vect.union(j_vector))
-			intersection = len(movieid_vect.intersection(j_vector))
+			union = len(item_vectors[movieid].union(item_vectors[j]))
+			intersection = len(item_vectors[movieid].intersection(item_vectors[j]))
 			sim = intersection / float(union)
+
+			# j_vector = set(M.getcol(j).nonzero()[0])
+			# union = len(movieid_vect.union(j_vector))
+			# intersection = len(movieid_vect.intersection(j_vector))
+			# sim = intersection / float(union)
 
 
 		# if hybrid mode is selected, we compute linear combination between cf similarity and content-based similarity	
@@ -537,10 +589,11 @@ def topK_JaccardSimilarity(M, similarities, userid, movieid, hybrid, M_profiles,
 
 		# --------------------------------------------------------------------
 
-
 		similarities[ (movieid, j) ] = sim
 		similarities[ (j, movieid) ] = sim
 		top_k.append((j, sim))
+
+		
 
 	# top items similar to movieid rated by userid
 	top_k = sorted(top_k, key=lambda x: x[1], reverse=True)

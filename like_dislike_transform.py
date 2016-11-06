@@ -98,7 +98,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     parser.add_argument("filepath", type=str, help="file source path (string)")
-    parser.add_argument("threshold", type=float, nargs="?", const=1, default=THRESHOLD_DEFAULT, help="binary threshold (float)")
+    parser.add_argument("threshold", type=float, nargs="?", const=1, default=THRESHOLD_DEFAULT, choices=[2.0, 2.5, 3.0, 3.5, 4.0], help="binary threshold (float)")
 
 
     args = parser.parse_args()

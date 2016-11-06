@@ -12,10 +12,13 @@
 
 
 import io
+import csv
 import requests
 import argparse
 import pprint
 import json
+from collections import defaultdict
+from collections import OrderedDict
 
 
 BASE_URL = "http://www.omdbapi.com/?"
@@ -26,7 +29,7 @@ FIELDS = ["Title", "Year", "Director", "Actors", "Genre", "Language", "Country",
 PP = pprint.PrettyPrinter(indent=4)
 
 
-
+# http://www.omdbapi.com/?t=Star+Wars&y=1977&plot=full&r=json
 
 
 
@@ -43,10 +46,65 @@ def parseOutputFolderPath(filepath):
 
 
 
+def test(filepath):
+
+	src_folder = parseOutputFolderPath(filepath)
+	out_file = io.open(src_folder + "output/metadata_full.csv", "w", encoding="ISO-8859-1")
+
+
+	old_dict = OrderedDict()
+	new_dict = OrderedDict()
+
+	with io.open(filepath, "r", encoding="ISO-8859-1") as file:
+
+		for line in file:
+			tokens = line.strip().split("|")
+			movieid = int(tokens[0], 10)
+			title = tokens[1]
+			if title[-1:] == ")" and title[-2:-1].isdigit():
+				title = title[:-7]
+			title = title.replace(", The", "")
+
+			old_dict[title] = int(line[0], 10)
+
+
+	print str(len(old_dict.keys()))
+
+
+
+
+	with io.open("datasets/ml-latest-small/latest_small_metadata_full.csv", "r", encoding="ISO-8859-1") as file:
+		file.readline()		# skip header
+		for line in file:
+			tokens = line.strip().split("\t")
+			try:
+				movieid = int(tokens[0], 10)
+				title = tokens[3]
+				new_dict[title] = movieid
+			except:
+				print line
+
+
+	total = 0
+	count = 0
+
+	for key in old_dict:
+		total += 1
+		if key in new_dict:
+			count += 1
+
+	print "{0}/{1}".format(count, total)
+
+
+
+
+
+
+
 def getMetadata(filepath):
 
 	out_folder = parseOutputFolderPath(filepath)
-	out_file = io.open(out_folder + "metadata_full.csv", "w", encoding="ISO-8859-1")
+	out_file = io.open(out_folder + "latest_small_metadata_full.csv", "w", encoding="ISO-8859-1")
 
 	with open(filepath, "r") as file:
 
@@ -137,7 +195,9 @@ if __name__ == '__main__':
 
 	args = parser.parse_args()
 
-	getMetadata(args.filepath)
+	# getMetadata(args.filepath)
+
+	test(args.filepath)
 
 
 

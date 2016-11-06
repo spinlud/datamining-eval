@@ -17,9 +17,10 @@ import argparse
 import math
 import numpy as np
 import scipy.sparse as sp
-from scipy.sparse.linalg import svds
-from sklearn.metrics import mean_squared_error
-from math import sqrt
+
+from recsys.algorithm.factorize import SVD
+from recsys.evaluation.prediction import MAE
+from recsys.evaluation.prediction import RMSE
 
 
 from scipy import io as spio
@@ -45,6 +46,8 @@ NUM_FOLDS = 5
 TRAIN_PREFIX = "_train_"
 TEST_PREFIX = "_test_"
 EXT = ".csv"
+MIN_RATING = 1.0
+MAX_RATING = 5.0
 
 
 
@@ -73,6 +76,7 @@ def parseFileName(filepath):
 
 
 
+
 def svd(filepath):
 
 	src_folder = parseOutputFolderPath(filepath)
@@ -90,7 +94,6 @@ def svd(filepath):
 
 		print "*** \t FOLD {0} \t ***".format(fold_index)
 
-		M_train = lil_matrix( (_N, _M) )
 		M_test = lil_matrix( (_N, _M) )
 		rmse = 0.0
 		mae = 0.0
@@ -98,52 +101,64 @@ def svd(filepath):
 		train_path = src_folder + base_file_name + TRAIN_PREFIX + str(fold_index) + EXT
 		test_path = src_folder + base_file_name + TEST_PREFIX + str(fold_index) + EXT
 
+		print train_path
+		print test_path
 
-		with open(train_path, "r") as infile:
-				reader = csv.reader(infile, delimiter=",")	
-				for line in reader:
-					userid = int(line[0], 10)
-					movieid = int(line[1], 10)
-					score = float(line[2])
-					M_train[userid, movieid] = score
+
+
+		svd = SVD()
+		svd.load_data(filename=train_path,
+		            sep=',',
+		            format={'col':0, 'row':1, 'value':2, 'ids': float})
+
+		svd.compute(k=_K,
+		            min_values=1,
+		            pre_normalize=None,
+		            mean_center=True,
+		            post_normalize=True)
+
+
 
 		with open(test_path, "r") as infile:
-				reader = csv.reader(infile, delimiter=",")	
-				for line in reader:
-					userid = int(line[0], 10)
-					movieid = int(line[1], 10)
-					score = float(line[2])
-					M_test[userid, movieid] = score
+			reader = csv.reader(infile, delimiter=",")	
+			for line in reader:
+				userid = int(line[0], 10)
+				movieid = int(line[1], 10)
+				score = float(line[2])
+				M_test[userid, movieid] = score
 				
 
 
-		# SVD on training matrix
-		U, S, V_t = svds(M_train, k = _K)
-		S_diag = np.diag(S)
-		R_hat = np.dot(np.dot(U, S_diag), V_t)
+
+		# GROUND_TRUTH = [3.0, 1.0, 5.0, 2.0, 3.0]
+		# TEST = [2.3, 0.9, 4.9, 0.9, 1.5]
+		# mae = MAE()
+		# mae.load_ground_truth(GROUND_TRUTH)
+		# mae.load_test(TEST)
+		# mae.compute() #returns 0.7		
 
 
-		# Index matrix for testing data
-		I = M_test.toarray().copy()
-		I[I > 0] = 1
-		I[I == 0] = 0
 
 
-		rmse, mae = compute_errors(M_test, I, R_hat)
-		avg_rmse += rmse
-		avg_mae += mae
-
+		
 
 		# write predictions only for first test (fold)
 		if (fold_index == 1):	
 			rows, cols = M_test.nonzero()
 			for row, col in zip(rows,cols):
-				r_xi = R_hat[row, col]
+				try:
+					r_xi = svd.predict(col, row, MIN_RATING, MAX_RATING)
+				except:
+					print row, col
 				out_file.write(str(row) + '\t' + str(col) + '\t' + str(r_xi) + '\n')
+
+		
 
 
 		print "..done"
 		print ""
+
+		exit()
 
 
 
@@ -166,8 +181,8 @@ def svd(filepath):
 
 
 def compute_errors(M, I, R_hat):
-	R_hat[R_hat < 1.0] = 1.0	# clamp in [1,5]
-	R_hat[R_hat > 5.0] = 5.0	# clamp in [1,5]
+	# R_hat[R_hat < 1.0] = 1.0	# clamp in [1,5]
+	# R_hat[R_hat > 5.0] = 5.0	# clamp in [1,5]
 
 	E = (I * (M.toarray() - R_hat))
 
