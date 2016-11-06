@@ -1,3 +1,17 @@
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+
+#################################################################################
+#
+#   file:           gsd_uv.py
+#   author:         Ludovico Fabbri 1197400
+#   description:    recommendations using UV decomposition with stocastic gradient descent
+#
+#
+#################################################################################
+
+
+
 import csv
 import io
 import argparse
@@ -33,7 +47,7 @@ EXT = ".csv"
 
 lmbda = 0.1 # Regularisation weight
 k = 20  # Dimension of the latent feature space
-n_epochs = 50  # Number of epochs
+n_epochs = 100  # Number of epochs
 gamma = 0.01  # Learning rate
 
 
@@ -77,6 +91,7 @@ def stochasticGradientDescentUV(filepath):
 	out_file = open(src_folder + "output/" + out_file_base + EXT, "w")
 
 
+	# for each fold
 	for fold_index in xrange(1, NUM_FOLDS + 1):
 
 		print "*** \t FOLD {0} \t ***".format(fold_index)
@@ -90,12 +105,13 @@ def stochasticGradientDescentUV(filepath):
 
 		#################################################################################
 		#
-		#	training phase
+		#	Get training data and testing data
 		#
 		#################################################################################
-		print "Training phase.."
+		
 
 		train_path = src_folder + base_file_name + TRAIN_PREFIX + str(fold_index) + EXT
+		test_path = src_folder + base_file_name + TEST_PREFIX + str(fold_index) + EXT
 
 		with open(train_path, "r") as infile:
 			reader = csv.reader(infile, delimiter=",")	
@@ -105,21 +121,50 @@ def stochasticGradientDescentUV(filepath):
 				score = float(line[2])
 				M_train[userid, movieid] = score
 
+
+		with open(test_path, "r") as infile:
+
+			reader = csv.reader(infile, delimiter=",")	
+
+			for line in reader:
+				userid = int(line[0], 10)
+				movieid = int(line[1], 10)
+				score = float(line[2])
+				M_test[userid, movieid] = score
+
+
+
+
+
+		#################################################################################
+		#
+		#	Training phase
+		#
+		#################################################################################		
+		print "Training phase.."
+
 		pbar = ProgressBar(widgets=widgets, maxval=n_epochs).start()     
 		count = 0
 
 		# Index matrix for training data
-		I = M_train.toarray().copy()
-		I[I > 0] = 1
-		I[I == 0] = 0
+		I_train = M_train.toarray().copy()
+		I_train[I_train > 0] = 1
+		I_train[I_train == 0] = 0
+
+		I_test = M_test.toarray().copy()
+		I_test[I_test > 0] = 1
+		I_test[I_test == 0] = 0
 
 		P = 3 * np.random.rand(k, _N) # Latent user feature matrix initialization
 		Q = 3 * np.random.rand(k, _M) # Latent movie feature matrix initialization
 
 		users, items = M_train.nonzero() 
-		train_errors = []
-		test_erros = []
+		train_errors_rmse = []
+		train_errors_mae = []
+		test_errors_rmse = []
+		test_errors_mae = []
 
+		
 		# start gradient descent optimization
 		for epoch in xrange(n_epochs):
 			for u, i in zip(users, items):
@@ -127,70 +172,54 @@ def stochasticGradientDescentUV(filepath):
 				P[:,u] += gamma * ( e * Q[:,i] - lmbda * P[:,u]) # Update latent user feature matrix
 				Q[:,i] += gamma * ( e * P[:,u] - lmbda * Q[:,i])  # Update latent movie feature matrix
 
-			train_rmse = compute_rmse(M_train, I, P, Q) # Calculate root mean squared error from train dataset	
-			train_errors.append(train_rmse)	
+			if (fold_index == 1):	
+				train_rmse, train_mae = compute_errors(M_train, I_train, P, Q) # Calculate rmse and mae error from train dataset	
+				test_rmse, test_mae = compute_errors(M_test, I_test, P, Q)	# Calculate rmse and mae error from test dataset
+				train_errors_rmse.append(train_rmse)
+				train_errors_mae.append(train_mae)	
+				test_errors_rmse.append(test_rmse)
+				test_errors_mae.append(test_mae)
+
 			count += 1
 			pbar.update(count)
 
 
 		pbar.finish()
-
-		# prediction matrix is the dot product between P.T and Q 
-		R_hat = prediction(P, Q)
-
 		print "..done"
 
+		if fold_index == 1:
+			plot(n_epochs, train_errors_rmse, test_errors_rmse, train_errors_mae, test_errors_mae)
 
-		plot(n_epochs, train_errors)
+	
 
 
-
+	
 		#################################################################################
 		#
 		#	test phase
 		#
 		#################################################################################
 		print "Test phase.."
-		test_path = src_folder + base_file_name + TEST_PREFIX + str(fold_index) + EXT
 
-		with open(test_path, "r") as infile:
+		# write predictions only for first test (fold)
+		if (fold_index == 1):	
+			R_hat = prediction(P, Q)
+			rows, cols = M_test.nonzero()
+			for row, col in zip(rows,cols):
+				r_xi = R_hat[row, col]
+				out_file.write(str(row) + '\t' + str(col) + '\t' + str(r_xi) + '\n')
 
-			reader = csv.reader(infile, delimiter=",")	
-			count = 0
+		
 
-			for line in reader:
-				userid = int(line[0], 10)
-				movieid = int(line[1], 10)
-				score = float(line[2])
-				# M_test[userid, movieid] = score
+		# update rmse and mae
+		test_rmse, test_mae = compute_errors(M_test, I_test, P, Q)	# Calculate rmse and mae error from test dataset
+		avg_rmse += test_rmse
+		avg_mae += test_mae		
 
-				r_xi = R_hat[userid, movieid]
+		print "..done"
+		print ""
+				
 
-				# clamp in [1, 5]
-				r_xi = 1.0 if r_xi < 1.0 else r_xi
-				r_xi = 5.0 if r_xi > 5.0 else r_xi
-
-				error = r_xi - score
-				rmse += error**2
-				mae += abs(error)
-				count += 1
-
-				# write predictions only for first test (fold)
-				if (fold_index == 1):
-					out_file.write(line[0] + '\t' + line[1] + '\t' + str(r_xi) + '\n')
-
-
-		# normalize rmse and mae
-		rmse = math.sqrt(rmse / float(count))
-		mae = math.sqrt(mae / float(count))
-		avg_rmse += rmse
-		avg_mae += mae
-
-
-
-
-		out_file.close()
-		print ""	
 
 
 	# average rmse and mae on validation folds
@@ -201,17 +230,26 @@ def stochasticGradientDescentUV(filepath):
 		avg_rmse /= float(NUM_FOLDS)
 		avg_mae /= float(NUM_FOLDS)
 		file.write(str(avg_rmse) + "\t" + str(avg_mae))
+	
 
 
 
 
 
+def compute_errors(M, I, P, Q):
+	R = prediction(P, Q)
+	R[R < 1.0] = 1.0	# clamp in [1,5]
+	R[R > 5.0] = 5.0	# clamp in [1,5]
 
-def compute_rmse(M, I, P, Q):	
-	rmse = np.sum( (I * (M.toarray() - prediction(P, Q)))**2 )
+	E = (I * (M.toarray() - R))
+
+	rmse = np.sum( E**2 )
 	rmse = np.sqrt(rmse / len(M.nonzero()[0]))
-	print rmse
-	return rmse
+
+	mae = np.sum( np.absolute(E) )
+	mae = np.sqrt(mae / len(M.nonzero()[0]))
+	
+	return rmse, mae
 
 
 	
@@ -229,9 +267,11 @@ def prediction(P, Q):
 
 
 
-def plot(n_epochs, train_errors):
-	plt.plot(range(n_epochs), train_errors, marker='o', label='Training Data');
-	# plt.plot(range(n_epochs), test_errors, marker='v', label='Test Data');
+def plot(n_epochs, train_errors_rmse, test_errors_rmse, train_errors_mae, test_errors_mae):
+	plt.plot(range(n_epochs), train_errors_rmse, marker='o', label='Training Data');
+	plt.plot(range(n_epochs), test_errors_rmse, marker='v', label='Test Data');
+	plt.plot(range(n_epochs), train_errors_mae, marker='o', label='Training Data');
+	plt.plot(range(n_epochs), test_errors_mae, marker='v', label='Test Data');
 	plt.title('SGD-WR Learning Curve')
 	plt.xlabel('Number of Epochs');
 	plt.ylabel('RMSE');
