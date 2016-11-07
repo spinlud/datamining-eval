@@ -87,7 +87,7 @@ def stochasticGradientDescentUV(filepath):
 	avg_rmse = 0.0
 	avg_mae = 0.0
 
-	out_file_base = base_file_name + "_pred_sgd_uv"
+	out_file_base = base_file_name + "_pred_sgd_wr_{0}-{1}-{2}".format(lmbda, k, gamma)
 	out_file = open(src_folder + "output/" + out_file_base + EXT, "w")
 
 
@@ -114,7 +114,7 @@ def stochasticGradientDescentUV(filepath):
 		test_path = src_folder + base_file_name + TEST_PREFIX + str(fold_index) + EXT
 
 		with open(train_path, "r") as infile:
-			reader = csv.reader(infile, delimiter=",")	
+			reader = csv.reader(infile, delimiter="\t")	
 			for line in reader:
 				userid = int(line[0], 10)
 				movieid = int(line[1], 10)
@@ -124,7 +124,7 @@ def stochasticGradientDescentUV(filepath):
 
 		with open(test_path, "r") as infile:
 
-			reader = csv.reader(infile, delimiter=",")	
+			reader = csv.reader(infile, delimiter="\t")	
 
 			for line in reader:
 				userid = int(line[0], 10)
@@ -172,13 +172,14 @@ def stochasticGradientDescentUV(filepath):
 				P[:,u] += gamma * ( e * Q[:,i] - lmbda * P[:,u]) # Update latent user feature matrix
 				Q[:,i] += gamma * ( e * P[:,u] - lmbda * Q[:,i])  # Update latent movie feature matrix
 
-			if (fold_index == 1):	
-				train_rmse, train_mae = compute_errors(M_train, I_train, P, Q) # Calculate rmse and mae error from train dataset	
-				test_rmse, test_mae = compute_errors(M_test, I_test, P, Q)	# Calculate rmse and mae error from test dataset
-				train_errors_rmse.append(train_rmse)
-				train_errors_mae.append(train_mae)	
-				test_errors_rmse.append(test_rmse)
-				test_errors_mae.append(test_mae)
+
+			# if (fold_index == 1):	
+			# 	train_rmse, train_mae = compute_errors(M_train, I_train, P, Q) # Calculate rmse and mae error from train dataset	
+			# 	test_rmse, test_mae = compute_errors(M_test, I_test, P, Q)	# Calculate rmse and mae error from test dataset
+			# 	train_errors_rmse.append(train_rmse)
+			# 	train_errors_mae.append(train_mae)	
+			# 	test_errors_rmse.append(test_rmse)
+			# 	test_errors_mae.append(test_mae)
 
 			count += 1
 			pbar.update(count)
@@ -187,8 +188,8 @@ def stochasticGradientDescentUV(filepath):
 		pbar.finish()
 		print "..done"
 
-		if fold_index == 1:
-			plot(n_epochs, train_errors_rmse, test_errors_rmse, train_errors_mae, test_errors_mae)
+		# if fold_index == 1:
+		# 	plot(n_epochs, train_errors_rmse, test_errors_rmse, train_errors_mae, test_errors_mae, True)
 
 	
 
@@ -215,6 +216,8 @@ def stochasticGradientDescentUV(filepath):
 		test_rmse, test_mae = compute_errors(M_test, I_test, P, Q)	# Calculate rmse and mae error from test dataset
 		avg_rmse += test_rmse
 		avg_mae += test_mae		
+
+		print avg_rmse, avg_mae
 
 		print "..done"
 		print ""
@@ -267,17 +270,31 @@ def prediction(P, Q):
 
 
 
-def plot(n_epochs, train_errors_rmse, test_errors_rmse, train_errors_mae, test_errors_mae):
+def plot(n_epochs, train_errors_rmse, test_errors_rmse, train_errors_mae, test_errors_mae, show=False):
 	plt.plot(range(n_epochs), train_errors_rmse, marker='o', label='Training Data');
 	plt.plot(range(n_epochs), test_errors_rmse, marker='v', label='Test Data');
-	plt.plot(range(n_epochs), train_errors_mae, marker='o', label='Training Data');
-	plt.plot(range(n_epochs), test_errors_mae, marker='v', label='Test Data');
-	plt.title('SGD-WR Learning Curve')
+	plt.title('SGD-WR RMSE Learning Curve')
 	plt.xlabel('Number of Epochs');
 	plt.ylabel('RMSE');
 	plt.legend()
 	plt.grid()
-	plt.show()
+	plt.savefig("sgd_rmse_curve_{0}-{1}-{2}.eps".format(lmbda, k, gamma), format="eps", dpi=1000, bbox_inches='tight')
+	if show:
+		plt.show()
+
+	# clear
+	plt.clf()
+
+	plt.plot(range(n_epochs), train_errors_mae, marker='o', label='Training Data');
+	plt.plot(range(n_epochs), test_errors_mae, marker='v', label='Test Data');
+	plt.title('SGD-WR MAE Learning Curve')
+	plt.xlabel('Number of Epochs');
+	plt.ylabel('MAE');
+	plt.legend()
+	plt.grid()
+	plt.savefig("sgd_mae_curve_{0}-{1}-{2}.eps".format(lmbda, k, gamma), format="eps", dpi=1000, bbox_inches='tight')
+	if show:
+		plt.show()
 
 
 
