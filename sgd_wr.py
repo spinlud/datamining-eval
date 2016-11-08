@@ -46,7 +46,7 @@ _N = 138436 + 1
 _M = 131258 + 1
 
 
-NUM_FOLDS = 5
+NUM_FOLDS = 1
 TRAIN_PREFIX = "_train_"
 TEST_PREFIX = "_test_"
 EXT = ".csv"
@@ -197,13 +197,13 @@ def stochasticGradientDescentUV(filepath):
 				Q[:,i] += gamma * ( e * P[:,u] - lmbda * Q[:,i])  # Update latent movie feature matrix
 
 
-			# if (fold_index == 1):	
-			# 	train_rmse, train_mae = compute_errors_light(M_train, I_train, P, Q) # Calculate rmse and mae error from train dataset	
-			# 	test_rmse, test_mae = compute_errors_light(M_test, I_test, P, Q)	# Calculate rmse and mae error from test dataset
-			# 	train_errors_rmse.append(train_rmse)
-			# 	train_errors_mae.append(train_mae)	
-			# 	test_errors_rmse.append(test_rmse)
-			# 	test_errors_mae.append(test_mae)
+			if (fold_index == 1):	
+				train_rmse, train_mae = compute_errors_light(M_train, I_train, P, Q) # Calculate rmse and mae error from train dataset	
+				test_rmse, test_mae = compute_errors_light(M_test, I_test, P, Q)	# Calculate rmse and mae error from test dataset
+				train_errors_rmse.append(train_rmse)
+				train_errors_mae.append(train_mae)	
+				test_errors_rmse.append(test_rmse)
+				test_errors_mae.append(test_mae)
 
 
 
@@ -214,8 +214,8 @@ def stochasticGradientDescentUV(filepath):
 		pbar.finish()
 		print "..done"
 
-		# if fold_index == 1:
-		# 	plot(n_epochs, train_errors_rmse, test_errors_rmse, train_errors_mae, test_errors_mae, True)
+		if fold_index == 1:
+			plot(n_epochs, train_errors_rmse, test_errors_rmse, train_errors_mae, test_errors_mae, True)
 
 	
 
