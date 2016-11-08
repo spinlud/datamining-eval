@@ -86,11 +86,22 @@ def parseFileName(filepath):
 
 
 
+
 def build_tfidf_documents(src_folder):
 
 	movie_tfidf_profiles = OrderedDict()
 
-	# first add metadata 
+
+	# add folksonomy to profiles
+	with io.open(src_folder + "folksonomy.csv", "r", encoding="ISO-8859-1") as file:
+		for line in file:
+			tokens = line.strip().split("\t")
+			movieid = int(tokens[0], 10)
+			tags = " ".join(tokens[1:])
+			movie_tfidf_profiles[movieid] = tags
+
+
+	# then add metadata to profiles
 	with io.open(src_folder + "latest_small_metadata_full.csv", "r", encoding="ISO-8859-1") as file:
 		file.readline()		# skip header
 		for line in file:
@@ -98,36 +109,38 @@ def build_tfidf_documents(src_folder):
 			movieid = int(tokens[0], 10)
 			tokens = tokens[3:]	
 			text = " ".join(tokens)
-			movie_tfidf_profiles[movieid] = text
+			if movieid in movie_tfidf_profiles:
+				movie_tfidf_profiles[movieid] += " " + text
+
 
 			
 
-	# add folksonomy from small dataset
-	with io.open(src_folder + "tags.csv", "r", encoding="ISO-8859-1") as file:
-		file.readline()		# skip header
-		for line in file:
-			tokens = line.strip().split(",")
-			movieid = int(tokens[1], 10)
-			tag = tokens[2]
-			try:
-				movie_tfidf_profiles[movieid] += " " + tag
-			except Exception as e:
-				print line
-				print e
+	# # add folksonomy from small dataset
+	# with io.open(src_folder + "tags.csv", "r", encoding="ISO-8859-1") as file:
+	# 	file.readline()		# skip header
+	# 	for line in file:
+	# 		tokens = line.strip().split(",")
+	# 		movieid = int(tokens[1], 10)
+	# 		tag = tokens[2]
+	# 		try:
+	# 			movie_tfidf_profiles[movieid] += " " + tag
+	# 		except Exception as e:
+	# 			print line
+	# 			print e
 
-	# add folksonomy from big dataset
-	with io.open("datasets/ml-20m/tags.csv", "r", encoding="ISO-8859-1") as file:
-		file.readline()		# skip header
-		for line in file:
-			tokens = line.strip().split(",")
-			movieid = int(tokens[1], 10)
-			tag = tokens[2]
-			try:
-				if movieid in movie_tfidf_profiles:
-					movie_tfidf_profiles[movieid] += " " + tag
-			except Exception as e:
-				print line
-				print e
+	# # add folksonomy from big dataset
+	# with io.open("datasets/ml-20m/tags.csv", "r", encoding="ISO-8859-1") as file:
+	# 	file.readline()		# skip header
+	# 	for line in file:
+	# 		tokens = line.strip().split(",")
+	# 		movieid = int(tokens[1], 10)
+	# 		tag = tokens[2]
+	# 		try:
+	# 			if movieid in movie_tfidf_profiles:
+	# 				movie_tfidf_profiles[movieid] += " " + tag
+	# 		except Exception as e:
+	# 			print line
+	# 			print e
 
 	
 

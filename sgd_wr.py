@@ -3,7 +3,7 @@
 
 #################################################################################
 #
-#   file:           gsd_uv.py
+#   file:           gsd_wr.py
 #   author:         Ludovico Fabbri 1197400
 #   description:    recommendations using UV decomposition with stocastic gradient descent
 #
@@ -38,8 +38,14 @@ widgets = ['Progress: ', Percentage(), ' ', Bar(marker=RotatingMarker()), ' ', E
 
 
 
-_N = 671 + 1
-_M = 164979 + 1
+# _N = 671 + 1
+# _M = 164979 + 1
+
+
+_N = 138436 + 1
+_M = 131258 + 1
+
+
 NUM_FOLDS = 5
 TRAIN_PREFIX = "_train_"
 TEST_PREFIX = "_test_"
@@ -134,7 +140,8 @@ def stochasticGradientDescentUV(filepath):
 
 
 
-
+		M_train = M_train.tocsr()
+		M_test = M_test.tocsr()
 
 		#################################################################################
 		#
@@ -146,14 +153,30 @@ def stochasticGradientDescentUV(filepath):
 		pbar = ProgressBar(widgets=widgets, maxval=n_epochs).start()     
 		count = 0
 
-		# Index matrix for training data
-		I_train = M_train.toarray().copy()
-		I_train[I_train > 0] = 1
-		I_train[I_train == 0] = 0
 
-		I_test = M_test.toarray().copy()
-		I_test[I_test > 0] = 1
-		I_test[I_test == 0] = 0
+		# Index matrix for training data
+		I_train = M_train.copy()
+		for i in xrange(len(I_train.data)):
+			I_train.data[i] = 1
+
+
+		# Index matrix for test data
+		I_test = M_test.copy()
+		for i in xrange(len(I_test.data)):
+			I_test.data[i] = 1
+
+
+		# # Index matrix for training data
+		# I_train = M_train.toarray().copy()
+		# I_train[I_train > 0] = 1
+		# I_train[I_train == 0] = 0
+
+		# # Index matrix for test data
+		# I_test = M_test.toarray().copy()
+		# I_test[I_test > 0] = 1
+		# I_test[I_test == 0] = 0
+
+
 
 		P = 3 * np.random.rand(k, _N) # Latent user feature matrix initialization
 		Q = 3 * np.random.rand(k, _M) # Latent movie feature matrix initialization
@@ -169,17 +192,20 @@ def stochasticGradientDescentUV(filepath):
 		for epoch in xrange(n_epochs):
 			for u, i in zip(users, items):
 				e = M_train[u, i] - prediction(P[:,u],Q[:,i])  # Calculate error for gradient
+
 				P[:,u] += gamma * ( e * Q[:,i] - lmbda * P[:,u]) # Update latent user feature matrix
 				Q[:,i] += gamma * ( e * P[:,u] - lmbda * Q[:,i])  # Update latent movie feature matrix
 
 
 			# if (fold_index == 1):	
-			# 	train_rmse, train_mae = compute_errors(M_train, I_train, P, Q) # Calculate rmse and mae error from train dataset	
-			# 	test_rmse, test_mae = compute_errors(M_test, I_test, P, Q)	# Calculate rmse and mae error from test dataset
+			# 	train_rmse, train_mae = compute_errors_light(M_train, I_train, P, Q) # Calculate rmse and mae error from train dataset	
+			# 	test_rmse, test_mae = compute_errors_light(M_test, I_test, P, Q)	# Calculate rmse and mae error from test dataset
 			# 	train_errors_rmse.append(train_rmse)
 			# 	train_errors_mae.append(train_mae)	
 			# 	test_errors_rmse.append(test_rmse)
 			# 	test_errors_mae.append(test_mae)
+
+
 
 			count += 1
 			pbar.update(count)
@@ -203,17 +229,25 @@ def stochasticGradientDescentUV(filepath):
 		print "Test phase.."
 
 		# write predictions only for first test (fold)
-		if (fold_index == 1):	
-			R_hat = prediction(P, Q)
-			rows, cols = M_test.nonzero()
-			for row, col in zip(rows,cols):
-				r_xi = R_hat[row, col]
-				out_file.write(str(row) + '\t' + str(col) + '\t' + str(r_xi) + '\n')
+		# if (fold_index == 1):	
+		# 	R_hat = prediction(P, Q)
+		# 	rows, cols = M_test.nonzero()
+		# 	for row, col in zip(rows,cols):
+		# 		r_xi = R_hat[row, col]
+		# 		out_file.write(str(row) + '\t' + str(col) + '\t' + str(r_xi) + '\n')
+
+
+		# write predictions only for first test (fold)
+		if fold_index == 1:
+			users, items = M_test.nonzero()
+			for u, i in zip(users, items):
+				r_xi = prediction(P[:,u],Q[:,i])
+				out_file.write(str(u) + '\t' + str(i) + '\t' + str(r_xi) + '\n')
 
 		
 
 		# update rmse and mae
-		test_rmse, test_mae = compute_errors(M_test, I_test, P, Q)	# Calculate rmse and mae error from test dataset
+		test_rmse, test_mae = compute_errors_light(M_test, I_test, P, Q)	# Calculate rmse and mae error from test dataset
 		avg_rmse += test_rmse
 		avg_mae += test_mae		
 
@@ -239,10 +273,17 @@ def stochasticGradientDescentUV(filepath):
 
 
 
+
+
+
 def compute_errors(M, I, P, Q):
+
 	R = prediction(P, Q)
+
 	R[R < 1.0] = 1.0	# clamp in [1,5]
 	R[R > 5.0] = 5.0	# clamp in [1,5]
+
+
 
 	E = (I * (M.toarray() - R))
 
@@ -251,8 +292,31 @@ def compute_errors(M, I, P, Q):
 
 	mae = np.sum( np.absolute(E) )
 	mae = np.sqrt(mae / len(M.nonzero()[0]))
-	
+
 	return rmse, mae
+
+
+
+
+
+# for really big matrices
+def compute_errors_light(M, I, P, Q):
+
+	users, items = M.nonzero()
+	rmse = 0.0
+	mae = 0.0
+
+	for u, i in zip(users, items):
+		e = M[u, i] - prediction(P[:,u],Q[:,i])  # Calculate error for gradient
+		mae += abs(e)
+		rmse += e**2
+		
+
+	rmse = math.sqrt(rmse / float(len(users)))
+	mae = math.sqrt(mae / float(len(users)))
+
+	return rmse, mae
+
 
 
 	

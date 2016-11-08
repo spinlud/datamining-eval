@@ -14,6 +14,7 @@
 import io
 # import csv
 # import unicodecsv as csv
+import operator
 import argparse
 import numpy as np
 import scipy as sp
@@ -33,11 +34,23 @@ _M = 164979 + 1
 
 
 
+def getTaggedMovies():
+	tagged_movies = set()
+	with io.open("datasets/ml-latest-small/folksonomy.csv", "r", encoding="ISO-8859-1") as file:
+		for line in file:
+			tokens = line.strip().split("\t")
+			movieid = int(tokens[0], 10)
+			tagged_movies.add(movieid)
+	return tagged_movies
+
 
 
 
 def build_unique_sorted_files():
 
+	tagged_movies = getTaggedMovies()	# movies with at least 4 tags
+
+	unique_years = set()
 	unique_directors = set()
 	unique_actors = set()
 	unique_genres = []
@@ -51,22 +64,28 @@ def build_unique_sorted_files():
 		for line in file:
 
 			tokens = line.strip().split("\t")
-			directors = set([x.strip() for x in tokens[5].split(",")])
-			actors = set([x.strip() for x in tokens[6].split(",")])
+			movieid = int(tokens[0], 10)
+
+			# skip all (< 4 tags) movies
+			if movieid in tagged_movies:
+				unique_years.add(tokens[6])
+				directors = set([x.strip() for x in tokens[4].split(",")])
+				actors = set([x.strip() for x in tokens[5].split(",")])
+				unique_directors = unique_directors.union(directors)
+				unique_actors = unique_actors.union(actors)
 		
 
 
-			unique_directors = unique_directors.union(directors)
-			unique_actors = unique_actors.union(actors)
-		
-
-
+		unique_years = sorted(unique_years)
 		unique_directors = sorted(unique_directors)
 		unique_actors = sorted(unique_actors)
 		
 
 
 
+		with io.open(OUT_FOLDER + "unique_years.csv", "w", encoding="ISO-8859-1") as file:
+			for x in unique_years:
+				file.write(x + "\n")
 
 
 		with io.open(OUT_FOLDER + "unique_directors.csv", "w", encoding="ISO-8859-1") as file:
@@ -88,19 +107,13 @@ def build_unique_sorted_files():
 
 
 
-
-	with io.open(SRC_FOLDER + "tags.csv", "r", encoding="ISO-8859-1") as file:
-
-		file.readline()		# skip header
-
+	with io.open(SRC_FOLDER + "folksonomy.csv", "r", encoding="ISO-8859-1") as file:
 		for line in file:
-			tokens = line.strip().split(",")
-			tag = tokens[2]
-			unique_tags.add(tag)
-
+			tags = line.strip().split("\t")[1:]
+			for tag in tags:
+				unique_tags.add(tag)
 
 		unique_tags = sorted(unique_tags)
-
 
 		with io.open(OUT_FOLDER + "unique_tags.csv", "w", encoding="ISO-8859-1") as file:
 			for tag in unique_tags:
@@ -110,6 +123,9 @@ def build_unique_sorted_files():
 
 
 	with io.open(OUT_FOLDER + "all_features.csv", "w", encoding="ISO-8859-1") as file:
+
+		for x in unique_years:
+			file.write(x + "\n")
 		
 		for x in unique_directors:
 			file.write(x + "\n")
@@ -132,32 +148,35 @@ def build_unique_sorted_files():
 
 def buildMoviesProfiles():
 
+	tagged_movies = getTaggedMovies()
+
 	# there are some duplicates, thus we use a dictionary for each feature
+	years_dict = OrderedDict()
 	directors_dict = OrderedDict()
 	actors_dict = OrderedDict()
 	genres_dict = OrderedDict()
 	tags_dict = OrderedDict()
 	index = 1
 
+	with io.open(OUT_FOLDER + "unique_years.csv", "r", encoding="ISO-8859-1") as file:
+		for line in file:
+			years_dict[line.strip()] = index
+			index += 1
+
 	with io.open(OUT_FOLDER + "unique_directors.csv", "r", encoding="ISO-8859-1") as file:
 		for line in file:
 			directors_dict[line.strip()] = index
 			index += 1
-
 			
 	with io.open(OUT_FOLDER + "unique_actors.csv", "r", encoding="ISO-8859-1") as file:
 		for line in file:
 			actors_dict[line.strip()] = index
-			index += 1
-
-			
+			index += 1		
 
 	with io.open(OUT_FOLDER + "unique_genres.csv", "r", encoding="ISO-8859-1") as file:
 		for line in file:
 			genres_dict[line.strip()] = index
 			index += 1
-
-
 
 	with io.open(OUT_FOLDER + "unique_tags.csv", "r", encoding="ISO-8859-1") as file:
 		for line in file:
@@ -166,7 +185,7 @@ def buildMoviesProfiles():
 
 
 
-	num_features = len(directors_dict) + len(actors_dict) + len(genres_dict) + len(tags_dict)	
+	num_features = len(years_dict) + len(directors_dict) + len(actors_dict) + len(genres_dict) + len(tags_dict)	
 	M_movies = lil_matrix( (_M, num_features + 1) )		# + 1 to match index with the all_features.csv file		
 	print M_movies._shape
 	
@@ -180,9 +199,11 @@ def buildMoviesProfiles():
 		for line in file:
 			tokens = line.strip().split("\t")
 			movieid = int(tokens[0], 10)
-			directors = [x.strip() for x in tokens[5].split(",")]
-			actors = [x.strip() for x in tokens[6].split(",")]
+			year = tokens[3]
+			directors = [x.strip() for x in tokens[4].split(",")]
+			actors = [x.strip() for x in tokens[5].split(",")]
 
+			M_movies[movieid, years_dict[year]] = 1.0
 
 			for x in directors:
 				M_movies[movieid, directors_dict[x]] = 1.0
@@ -215,16 +236,13 @@ def buildMoviesProfiles():
 	
 
 
-	with io.open(SRC_FOLDER + "tags.csv", "r", encoding="ISO-8859-1") as file:
-	
-		file.readline()		# skip header
-
+	with io.open(SRC_FOLDER + "folksonomy.csv", "r", encoding="ISO-8859-1") as file:
 		for line in file:
-			tokens = line.strip().split(",")
-			movieid= int(tokens[1], 10)
-			tag = tokens[2]
-
-			M_movies[movieid, tags_dict[tag]] = 1.0
+			tokens = line.strip().split("\t")
+			movieid= int(tokens[0], 10)
+			tags = tokens[1:]
+			for tag in tags:
+				M_movies[movieid, tags_dict[tag]] = 1.0
 
 			
 
@@ -232,6 +250,7 @@ def buildMoviesProfiles():
 	spio.savemat(OUT_FOLDER + "movie_profiles", {"M" : M_movies})
 			
 		
+
 
 
 
@@ -340,11 +359,11 @@ if __name__ == '__main__':
 
 
 
-	# build_unique_sorted_files()
+	build_unique_sorted_files()
 
-	buildMoviesProfiles()
+	# buildMoviesProfiles()
 
-	buildUserProfiles()
+	# buildUserProfiles()
 
 
 

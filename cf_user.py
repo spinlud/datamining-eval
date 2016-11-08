@@ -40,7 +40,7 @@ EXT = ".csv"
 COSINE_SIMILARITY = "cos"
 JACCARD_SIMILARITY = "jac"
 PEARSON_CORR = "pears"
-_P = 0.25
+_P = 0.5
 
 
 
